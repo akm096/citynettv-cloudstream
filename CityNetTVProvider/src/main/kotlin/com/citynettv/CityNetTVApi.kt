@@ -69,13 +69,13 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     // ── Headers ───────────────────────────────────────────────────────────────
 
-    private fun headers(withAuth: Boolean = true): Map<String, String> {
+    private fun headers(withAuth: Boolean = true, withAccessKey: Boolean = true): Map<String, String> {
         val h = mutableMapOf(
             "User-Agent"   to USER_AGENT,
             "Accept"       to "application/json",
-            "Content-Type" to "application/json",
-            "Access-Key"   to ACCESS_KEY
+            "Content-Type" to "application/json"
         )
+        if (withAccessKey) h["Access-Key"] = ACCESS_KEY
         if (withAuth) getAccessToken()?.let { h["Authorization"] = "Bearer $it" }
         return h
     }
@@ -91,7 +91,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             )
             val res = app.post(
                 "$API_BASE/v2/global/login",
-                headers = headers(false),
+                headers = headers(withAuth = false, withAccessKey = false),
                 requestBody = body.toOkHttpBody()
             )
             if (res.isSuccessful) {
@@ -114,7 +114,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val body = mapper.writeValueAsString(RefreshRequest(rt))
             val res = app.post(
                 "$API_BASE/v2/global/refresh",
-                headers = headers(false),
+                headers = headers(withAuth = false, withAccessKey = false),
                 requestBody = body.toOkHttpBody()
             )
             if (res.isSuccessful) {
