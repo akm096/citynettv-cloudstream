@@ -8,8 +8,10 @@ import com.lagradost.cloudstream3.plugins.Plugin
 class CityNetTVPlugin : Plugin() {
 
     override fun load(context: Context) {
-        // Register settings page (login screen)
-        settingsPage = CityNetTVSettingsFragment()
+        // Register settings button — opens login dialog
+        openSettings = { ctx ->
+            CityNetTVSettingsDialog.show(ctx)
+        }
 
         val provider = CityNetTVProvider(context)
         provider.initApi(context)

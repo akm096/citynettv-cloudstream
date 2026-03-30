@@ -76,6 +76,7 @@ subprojects {
         implementation("com.github.Blatzar:NiceHttp:0.4.11") // HTTP Lib
         implementation("org.jsoup:jsoup:1.18.3") // HTML Parser
         implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1") // JSON Parser
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3") // Coroutines
     }
 }
 
