@@ -132,7 +132,8 @@ object CityNetTVSettingsDialog {
                             statusView.text = "✅ Giriş edildi: $user"
                             msgView.text = "✅ Uğurla giriş edildi! Ana səhifəni yeniləyin."
                         } else {
-                            msgView.text = "❌ Giriş alınmadı. İstifadəçi adı / şifrəni yoxlayın."
+                            val errMsg = api.lastLoginError ?: "İstifadəçi adı / şifrəni yoxlayın."
+                            msgView.text = "❌ $errMsg"
                         }
                     }
                 } catch (e: Exception) {

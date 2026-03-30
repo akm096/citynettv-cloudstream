@@ -82,18 +82,26 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
+    var lastLoginError: String? = null
+        private set
+
     suspend fun login(username: String? = null, password: String? = null): Boolean {
         val user = username ?: getUsername() ?: return false
         val pass = password ?: getPassword() ?: return false
+        lastLoginError = null
         return try {
             val body = mapper.writeValueAsString(
                 LoginRequest(username = user, password = pass, device = getDeviceId())
             )
+            android.util.Log.d("CityNetTV", "Login request to: $API_BASE/v2/global/login")
+            android.util.Log.d("CityNetTV", "Login body: $body")
             val res = app.post(
                 "$API_BASE/v2/global/login",
                 headers = headers(withAuth = false, withAccessKey = false),
                 requestBody = body.toOkHttpBody()
             )
+            android.util.Log.d("CityNetTV", "Login response code: ${res.code}")
+            android.util.Log.d("CityNetTV", "Login response body: ${res.text}")
             if (res.isSuccessful) {
                 val lr = mapper.readValue(res.text, LoginResponse::class.java)
                 if (!lr.accessToken.isNullOrEmpty()) {
@@ -101,11 +109,35 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     val pid = lr.user?.profiles?.firstOrNull()?.id ?: lr.user?.profileId
                     saveUserInfo(lr.user?.uid, pid)
                     saveCredentials(user, pass)
+                    lastLoginError = null
                     return true
+                }
+                lastLoginError = lr.error ?: "Token alınmadı"
+            } else {
+                // Parse error response
+                try {
+                    val errBody = res.text
+                    val errNode = mapper.readTree(errBody)
+                    val errCode = errNode?.get("error_code")?.asInt() ?: errNode?.get("code")?.asInt()
+                    val errMsg = errNode?.get("message")?.asText()
+                        ?: errNode?.get("error")?.asText()
+                        ?: errNode?.get("error_message")?.asText()
+                    lastLoginError = when (errCode) {
+                        1067 -> "Cihaz limiti aşılıb. CityNet TV hesabından bir cihazı silin."
+                        else -> errMsg ?: "Server xətası: ${res.code}"
+                    }
+                    android.util.Log.e("CityNetTV", "Login error $errCode: $lastLoginError")
+                } catch (pe: Exception) {
+                    lastLoginError = "Server xətası: ${res.code}"
+                    android.util.Log.e("CityNetTV", "Login failed: ${res.code} - ${res.text}")
                 }
             }
             false
-        } catch (e: Exception) { e.printStackTrace(); false }
+        } catch (e: Exception) {
+            lastLoginError = "Şəbəkə xətası: ${e.message}"
+            e.printStackTrace()
+            false
+        }
     }
 
     suspend fun refreshToken(): Boolean {
