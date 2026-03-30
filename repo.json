@@ -1,0 +1,8 @@
+{
+  "name": "CityNetTV",
+  "description": "CityNetTV - Azərbaycan, Türkiyə, Rusiya TV kanalları",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/akm096/citynettv-cloudstream/builds/plugins.json"
+  ]
+}

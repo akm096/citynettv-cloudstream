@@ -1,0 +1,22 @@
+[
+    {
+        "iconUrl": "https://citynettv.az/favicon.ico",
+        "fileHash": "sha256-27a3b7390574253174193dfde9530e248ed334a41da62b1cd4f7ebe3d6ab43f9",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/akm096/citynettv-cloudstream",
+        "fileSize": 90558,
+        "status": 1,
+        "language": "az",
+        "authors": [
+            "CityNetTV Dev"
+        ],
+        "tvTypes": [
+            "Live"
+        ],
+        "version": 17,
+        "internalName": "CityNetTVProvider",
+        "description": "CityNetTV - Az\u0259rbaycan, T\u00fcrkiy\u0259, Rusiya TV kanallar\u0131",
+        "url": "https://raw.githubusercontent.com/akm096/citynettv-cloudstream/builds/CityNetTVProvider.cs3",
+        "name": "CityNetTVProvider"
+    }
+]
