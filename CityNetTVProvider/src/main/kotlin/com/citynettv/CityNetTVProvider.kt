@@ -69,7 +69,7 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             url  = data,
             type = TvType.Live
         ).apply {
-            this.posterUrl = ch.getLogoUrl()
+            this.posterUrl = ch.resolveLogoUrl()
         }
     }
 
@@ -98,13 +98,13 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         val plot = buildString {
             current?.let {
                 append("▶️ İndi: ${it.getDisplayName()}\n")
-                val s = it.getStartTime(); val e = it.getEndTime()
+                val s = it.resolveStartTime(); val e = it.resolveEndTime()
                 if (s != null && e != null) append("⏰ $s — $e\n")
                 if (!it.description.isNullOrEmpty()) append("\n${it.description}\n")
             }
             if (epg.size > 1) {
                 append("\n📋 Növbəti:\n")
-                epg.drop(1).take(5).forEach { append("• ${it.getStartTime() ?: ""} — ${it.getDisplayName()}\n") }
+                epg.drop(1).take(5).forEach { append("• ${it.resolveStartTime() ?: ""} — ${it.getDisplayName()}\n") }
             }
         }
 
@@ -131,7 +131,7 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
 
         val ld = try { mapper.readValue(data, ChannelLoadData::class.java) } catch (_: Exception) { return false }
         val sd = api.getStreamData(ld.slug) ?: return false
-        val streamUrl = sd.getStreamUrl() ?: return false
+        val streamUrl = sd.resolveStreamUrl() ?: return false
 
         val isM3u8 = streamUrl.contains(".m3u8")
 

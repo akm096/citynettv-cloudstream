@@ -78,9 +78,9 @@ data class ChannelData(
 ) {
     fun getDisplayName(): String = name ?: title ?: slug ?: "Unknown"
 
-    fun getLogoUrl(): String? = logo ?: logoUrl ?: image ?: imageUrl ?: poster ?: posterUrl
+    fun resolveLogoUrl(): String? = logo ?: logoUrl ?: image ?: imageUrl ?: poster ?: posterUrl
 
-    fun getCategory(): String {
+    fun resolveCategory(): String {
         // Return first category/genre found
         if (!categories.isNullOrEmpty()) return categories.first()
         if (!genres.isNullOrEmpty()) return genres.first()
@@ -261,7 +261,7 @@ data class StreamData(
     @JsonProperty("show_id") val showId: String? = null,
     @JsonProperty("server") val server: String? = null
 ) {
-    fun getStreamUrl(): String? = url ?: streamUrl ?: manifestUrl
+    fun resolveStreamUrl(): String? = url ?: streamUrl ?: manifestUrl
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -293,8 +293,8 @@ data class EpgItem(
     @JsonProperty("show_id") val showId: String? = null
 ) {
     fun getDisplayName(): String = title ?: name ?: "Proqram"
-    fun getStartTime(): String? = startTime ?: start
-    fun getEndTime(): String? = endTime ?: end
+    fun resolveStartTime(): String? = startTime ?: start
+    fun resolveEndTime(): String? = endTime ?: end
 }
 
 // ============== INTERNAL MODELS ==============
