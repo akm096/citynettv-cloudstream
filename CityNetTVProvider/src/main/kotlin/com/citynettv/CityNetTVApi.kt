@@ -20,6 +20,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         private const val PREF_USER_UID      = "citynettv_user_uid"
         private const val PREF_PROFILE_ID    = "citynettv_profile_id"
         private const val PREF_DEVICE_ID     = "citynettv_device_id"
+        private const val PREF_DEVICE_SUFFIX = "citynettv_device_suffix"
         private const val PREF_USERNAME      = "citynettv_username"
         private const val PREF_PASSWORD      = "citynettv_password"
     }
@@ -42,12 +43,33 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     fun getProfileId(): String? = prefs?.getString(PREF_PROFILE_ID, null)
 
     private fun getDeviceId(): String {
+        // Use saved device ID if available
         var id = prefs?.getString(PREF_DEVICE_ID, null)
-        if (id.isNullOrEmpty()) {
-            id = UUID.randomUUID().toString()
-            prefs?.edit()?.putString(PREF_DEVICE_ID, id)?.apply()
+        if (!id.isNullOrEmpty()) return id
+
+        // Generate a new device ID with optional suffix for uniqueness
+        val user = getUsername()
+        val suffix = prefs?.getString(PREF_DEVICE_SUFFIX, null) ?: ""
+        id = if (!user.isNullOrEmpty()) {
+            UUID.nameUUIDFromBytes("CityNetTV-CS-$user-$suffix".toByteArray()).toString()
+        } else {
+            UUID.randomUUID().toString()
         }
+        prefs?.edit()?.putString(PREF_DEVICE_ID, id)?.apply()
         return id
+    }
+
+    /**
+     * Cihaz ID-ni sıfırlayır — növbəti login zamanı yeni device ID yaranacaq.
+     * "Cihaz limiti aşılıb" xətası olduqda çağırılmalıdır.
+     */
+    fun resetDeviceId() {
+        val newSuffix = System.currentTimeMillis().toString()
+        prefs?.edit()
+            ?.remove(PREF_DEVICE_ID)
+            ?.putString(PREF_DEVICE_SUFFIX, newSuffix)
+            ?.apply()
+        android.util.Log.d("CityNetTV", "Device ID sıfırlandı, yeni suffix: $newSuffix")
     }
 
     private fun saveTokens(access: String?, refresh: String?) {
@@ -64,7 +86,28 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         prefs?.edit()
             ?.remove(PREF_ACCESS_TOKEN)?.remove(PREF_REFRESH_TOKEN)
             ?.remove(PREF_USER_UID)?.remove(PREF_PROFILE_ID)
+            ?.remove(PREF_DEVICE_ID)
             ?.apply()
+    }
+
+    /**
+     * API-dən cihaz sessiyasını silir — device slot-unu azad edir.
+     */
+    private suspend fun logoutDevice() {
+        try {
+            val token = getAccessToken()
+            if (token.isNullOrEmpty()) return
+            val deviceId = prefs?.getString(PREF_DEVICE_ID, null) ?: return
+            android.util.Log.d("CityNetTV", "Köhnə cihaz sessiyası silinir: $deviceId")
+            // Try common logout endpoints
+            app.post(
+                "$API_BASE/v2/global/logout",
+                headers = headers(withAuth = true, withAccessKey = false),
+                requestBody = "{\"device\":\"$deviceId\"}".toOkHttpBody()
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("CityNetTV", "Logout device failed (non-critical): ${e.message}")
+        }
     }
 
     // ── Headers ───────────────────────────────────────────────────────────────
@@ -90,6 +133,12 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         val pass = password ?: getPassword() ?: return false
         lastLoginError = null
         return try {
+            // Save credentials early so getDeviceId() can generate correct UUID
+            saveCredentials(user, pass)
+
+            // Try to logout old device session first (frees up device slot)
+            logoutDevice()
+
             val body = mapper.writeValueAsString(
                 LoginRequest(username = user, password = pass, device = getDeviceId())
             )
@@ -108,7 +157,6 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     saveTokens(lr.accessToken, lr.refreshToken)
                     val pid = lr.user?.profiles?.firstOrNull()?.id ?: lr.user?.profileId
                     saveUserInfo(lr.user?.uid, pid)
-                    saveCredentials(user, pass)
                     lastLoginError = null
                     return true
                 }
@@ -122,10 +170,15 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     val errMsg = errNode?.get("message")?.asText()
                         ?: errNode?.get("error")?.asText()
                         ?: errNode?.get("error_message")?.asText()
-                    lastLoginError = when (errCode) {
-                        1067 -> "Cihaz limiti aşılıb. CityNet TV hesabından bir cihazı silin."
-                        else -> errMsg ?: "Server xətası: ${res.code}"
+
+                    if (errCode == 1067) {
+                        // Device limit xətası — avtomatik olaraq yeni device ID ilə yenidən cəhd et
+                        android.util.Log.w("CityNetTV", "Device limit aşılıb, yeni device ID ilə cəhd edilir...")
+                        resetDeviceId()
+                        return retryLoginWithNewDevice(user, pass)
                     }
+
+                    lastLoginError = errMsg ?: "Server xətası: ${res.code}"
                     android.util.Log.e("CityNetTV", "Login error $errCode: $lastLoginError")
                 } catch (pe: Exception) {
                     lastLoginError = "Server xətası: ${res.code}"
@@ -136,6 +189,41 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         } catch (e: Exception) {
             lastLoginError = "Şəbəkə xətası: ${e.message}"
             e.printStackTrace()
+            false
+        }
+    }
+
+    /**
+     * Yeni device ID ilə login — device limit aşıldıqda avtomatik çağırılır.
+     * Yalnız 1 dəfə retry edir (sonsuz dövrənin qarşısını alır).
+     */
+    private suspend fun retryLoginWithNewDevice(user: String, pass: String): Boolean {
+        return try {
+            val body = mapper.writeValueAsString(
+                LoginRequest(username = user, password = pass, device = getDeviceId())
+            )
+            android.util.Log.d("CityNetTV", "Retry login with new device ID")
+            val res = app.post(
+                "$API_BASE/v2/global/login",
+                headers = headers(withAuth = false, withAccessKey = false),
+                requestBody = body.toOkHttpBody()
+            )
+            if (res.isSuccessful) {
+                val lr = mapper.readValue(res.text, LoginResponse::class.java)
+                if (!lr.accessToken.isNullOrEmpty()) {
+                    saveTokens(lr.accessToken, lr.refreshToken)
+                    val pid = lr.user?.profiles?.firstOrNull()?.id ?: lr.user?.profileId
+                    saveUserInfo(lr.user?.uid, pid)
+                    lastLoginError = null
+                    return true
+                }
+            }
+            // If retry also fails, give user-friendly message
+            lastLoginError = "Cihaz limiti aşılıb. CityNet TV hesabınızdan köhnə cihazları silin, sonra yenidən cəhd edin."
+            android.util.Log.e("CityNetTV", "Retry login also failed: ${res.code} - ${res.text}")
+            false
+        } catch (e: Exception) {
+            lastLoginError = "Şəbəkə xətası: ${e.message}"
             false
         }
     }
