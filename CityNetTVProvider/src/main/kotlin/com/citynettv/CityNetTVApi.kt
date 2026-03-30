@@ -128,10 +128,14 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         } catch (e: Exception) { e.printStackTrace(); login() }
     }
 
-    private suspend fun authGet(url: String, retried: Boolean = false) =
-        app.get(url, headers = headers()).also { res ->
-            if (res.code == 401 && !retried) { refreshToken(); authGet(url, true) }
+    private suspend fun authGet(url: String, retried: Boolean = false): com.lagradost.nicehttp.NiceResponse {
+        val res = app.get(url, headers = headers())
+        if (res.code == 401 && !retried) {
+            refreshToken()
+            return authGet(url, true)
         }
+        return res
+    }
 
     // ── Channels ──────────────────────────────────────────────────────────────
 

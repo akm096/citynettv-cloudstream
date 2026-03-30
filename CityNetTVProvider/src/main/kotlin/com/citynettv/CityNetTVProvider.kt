@@ -5,6 +5,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 
 class CityNetTVProvider(val context: Context? = null) : MainAPI() {
@@ -64,12 +65,12 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
     private fun toSearchResponse(ch: ChannelData): LiveSearchResponse {
         val data = mapper.writeValueAsString(ChannelLoadData(slug = ch.slug ?: ch.id ?: "", name = ch.getDisplayName()))
         return newLiveSearchResponse(
-            name      = ch.getDisplayName(),
-            url       = data,
-            apiName   = this.name,
-            type      = TvType.Live,
-            posterUrl = ch.getLogoUrl()
-        )
+            name = ch.getDisplayName(),
+            url  = data,
+            type = TvType.Live
+        ).apply {
+            this.posterUrl = ch.getLogoUrl()
+        }
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -110,13 +111,12 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         val dataJson = mapper.writeValueAsString(ld.copy(showId = current?.showId ?: current?.id))
 
         return newLiveStreamLoadResponse(
-            name      = ld.name,
-            url       = dataJson,
-            apiName   = this.name,
-            dataUrl   = dataJson,
-            posterUrl = null,
-            plot      = plot.ifEmpty { "CityNetTV — ${ld.name}" }
-        )
+            name    = ld.name,
+            url     = dataJson,
+            dataUrl = dataJson
+        ).apply {
+            this.plot = plot.ifEmpty { "CityNetTV — ${ld.name}" }
+        }
     }
 
     // ── LoadLinks ─────────────────────────────────────────────────────────────
@@ -138,14 +138,15 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         for (serverNum in 1..3) {
             callback.invoke(
                 newExtractorLink(
-                    source  = this.name,
-                    name    = if (serverNum == 1) ld.name else "${ld.name} S$serverNum",
-                    url     = streamUrl,
-                    referer = mainUrl,
-                    quality = Qualities.Unknown.value,
-                    isM3u8  = isM3u8,
-                    headers = mapOf("User-Agent" to CityNetTVApi.USER_AGENT, "Referer" to "$mainUrl/")
-                )
+                    source = this.name,
+                    name   = if (serverNum == 1) ld.name else "${ld.name} S$serverNum",
+                    url    = streamUrl,
+                    type   = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                ).apply {
+                    this.referer = mainUrl
+                    this.quality = Qualities.Unknown.value
+                    this.headers = mapOf("User-Agent" to CityNetTVApi.USER_AGENT, "Referer" to "$mainUrl/")
+                }
             )
         }
         return true
