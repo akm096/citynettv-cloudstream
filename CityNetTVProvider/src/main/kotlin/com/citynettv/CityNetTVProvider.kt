@@ -3,33 +3,19 @@ package com.citynettv
 import android.content.Context
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 
-/**
- * CityNetTV CloudStream Provider
- *
- * Azərbaycan, Türkiyə, Rusiya TV kanallarını kateqoriyalara
- * bölüb göstərir. Hər kanalın logosu görünür.
- *
- * Kateqoriyalar:
- * - Ölkəyə görə: 🇦🇿 Azərbaycan, 🇹🇷 Türkiyə, 🇷🇺 Rusiya
- * - Janra görə: 📰 Xəbərlər, ⚽ İdman, 🎬 Kino, 👶 Uşaq, 🎵 Musiqi, 🎭 Əyləncə, 📚 Sənədli
- */
 class CityNetTVProvider(val context: Context? = null) : MainAPI() {
 
-    override var mainUrl = "https://tv.citynettv.az"
-    override var name = "CityNetTV"
+    override var mainUrl  = "https://tv.citynettv.az"
+    override var name     = "CityNetTV"
     override val hasMainPage = true
-    override var lang = "az"
-
+    override var lang     = "az"
     override val supportedTypes = setOf(TvType.Live)
 
-    override val hasQuickSearch = false
-
     private val mapper = jacksonObjectMapper()
-
     lateinit var api: CityNetTVApi
 
     fun initApi(ctx: Context) {
@@ -37,192 +23,103 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         api = CityNetTVApi(prefs)
     }
 
-    // ============== ANA SƏHIFƏ ==============
+    // ── Main page ─────────────────────────────────────────────────────────────
 
-    /**
-     * CloudStream ana səhifəsində kateqoriyalar və kanallar göstərir.
-     * Hər kateqoriya üfüqi scrollable sıra kimi görünür.
-     */
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (!::api.isInitialized) {
-            context?.let { initApi(it) }
-        }
+        if (!::api.isInitialized) context?.let { initApi(it) }
+        if (!api.isLoggedIn()) api.login()
 
-        if (!api.isLoggedIn()) {
-            api.login()
-        }
-
-        val allChannels = api.getChannels()
-
-        if (allChannels.isEmpty()) {
-            return HomePageResponse(
-                listOf(
-                    HomePageList(
-                        name = "⚠️ Giriş edin (Ayarlar → CityNetTV)",
-                        list = emptyList(),
-                        isHorizontalImages = true
-                    )
-                )
+        val all = api.getChannels()
+        if (all.isEmpty()) {
+            return newHomePageResponse(
+                listOf(HomePageList("⚠️ Giriş edin (Ayarlar → CityNetTV)", emptyList(), isHorizontalImages = true))
             )
         }
 
         val sections = mutableListOf<HomePageList>()
 
-        // === ÖLKƏYƏ GÖRƏ KATEQORİYALAR ===
-        val byCountry = allChannels.groupBy { it.getCountryCategory() }
+        // Country rows
+        val byCountry = all.groupBy { it.getCountryCategory() }
             .toSortedMap(compareBy {
-                when {
-                    it.contains("Azərbaycan") -> 0
-                    it.contains("Türkiyə") -> 1
-                    it.contains("Rusiya") -> 2
-                    else -> 3
-                }
+                when { it.contains("Azərbaycan") -> 0; it.contains("Türkiyə") -> 1; it.contains("Rusiya") -> 2; else -> 3 }
             })
-
-        for ((countryName, channels) in byCountry) {
-            val items = channels.sortedBy { it.number ?: 999 }.map { channel ->
-                createChannelSearchResponse(channel)
-            }
-            if (items.isNotEmpty()) {
-                sections.add(
-                    HomePageList(
-                        name = countryName,
-                        list = items,
-                        isHorizontalImages = true
-                    )
-                )
-            }
+        for ((cat, chs) in byCountry) {
+            val items = chs.sortedBy { it.number ?: 999 }.map { toSearchResponse(it) }
+            if (items.isNotEmpty()) sections.add(HomePageList(cat, items, isHorizontalImages = true))
         }
 
-        // === JANRA GÖRƏ KATEQORİYALAR ===
-        val byGenre = allChannels.groupBy { it.getGenreCategory() }
+        // Genre rows
+        val byGenre = all.groupBy { it.getGenreCategory() }
             .toSortedMap(compareBy {
-                when {
-                    it.contains("Xəbərlər") -> 0
-                    it.contains("İdman") -> 1
-                    it.contains("Kino") -> 2
-                    it.contains("Əyləncə") -> 3
-                    it.contains("Uşaq") -> 4
-                    it.contains("Musiqi") -> 5
-                    it.contains("Sənədli") -> 6
-                    else -> 7
-                }
+                when { it.contains("Xəbərlər") -> 0; it.contains("İdman") -> 1; it.contains("Kino") -> 2; it.contains("Əyləncə") -> 3; it.contains("Uşaq") -> 4; it.contains("Musiqi") -> 5; it.contains("Sənədli") -> 6; else -> 7 }
             })
-
-        for ((genreName, channels) in byGenre) {
-            val items = channels.sortedBy { it.number ?: 999 }.map { channel ->
-                createChannelSearchResponse(channel)
-            }
-            if (items.isNotEmpty()) {
-                sections.add(
-                    HomePageList(
-                        name = genreName,
-                        list = items,
-                        isHorizontalImages = true
-                    )
-                )
-            }
+        for ((cat, chs) in byGenre) {
+            val items = chs.sortedBy { it.number ?: 999 }.map { toSearchResponse(it) }
+            if (items.isNotEmpty()) sections.add(HomePageList(cat, items, isHorizontalImages = true))
         }
 
-        return HomePageResponse(sections)
+        return newHomePageResponse(sections)
     }
 
-    /**
-     * Kanal üçün SearchResponse yaradır (logo ilə)
-     */
-    private fun createChannelSearchResponse(channel: ChannelData): LiveSearchResponse {
-        val loadData = ChannelLoadData(
-            slug = channel.slug ?: channel.id ?: "",
-            name = channel.getDisplayName()
-        )
-        val dataJson = mapper.writeValueAsString(loadData)
-
-        return LiveSearchResponse(
-            name = channel.getDisplayName(),
-            url = dataJson,
-            apiName = this.name,
-            type = TvType.Live,
-            posterUrl = channel.getLogoUrl(),
-            quality = if (channel.isHd == true) SearchQuality.HD else null
+    private fun toSearchResponse(ch: ChannelData): LiveSearchResponse {
+        val data = mapper.writeValueAsString(ChannelLoadData(slug = ch.slug ?: ch.id ?: "", name = ch.getDisplayName()))
+        return newLiveSearchResponse(
+            name      = ch.getDisplayName(),
+            url       = data,
+            apiName   = this.name,
+            type      = TvType.Live,
+            posterUrl = ch.getLogoUrl()
         )
     }
 
-    // ============== AXTARIŞ ==============
+    // ── Search ────────────────────────────────────────────────────────────────
 
     override suspend fun search(query: String): List<SearchResponse> {
-        if (!::api.isInitialized) {
-            context?.let { initApi(it) }
-        }
-
-        if (!api.isLoggedIn()) {
-            api.login()
-        }
-
-        val allChannels = api.getChannels()
-        val queryLower = query.lowercase()
-
-        return allChannels
-            .filter { channel ->
-                channel.getDisplayName().lowercase().contains(queryLower)
-            }
-            .map { channel -> createChannelSearchResponse(channel) }
+        if (!::api.isInitialized) context?.let { initApi(it) }
+        if (!api.isLoggedIn()) api.login()
+        val q = query.lowercase()
+        return api.getChannels()
+            .filter { it.getDisplayName().lowercase().contains(q) }
+            .map { toSearchResponse(it) }
     }
 
-    // ============== KANAL DETALI ==============
+    // ── Load ──────────────────────────────────────────────────────────────────
 
     override suspend fun load(url: String): LoadResponse {
-        if (!::api.isInitialized) {
-            context?.let { initApi(it) }
-        }
+        if (!::api.isInitialized) context?.let { initApi(it) }
 
-        val loadData = try {
-            mapper.readValue(url, ChannelLoadData::class.java)
-        } catch (e: Exception) {
-            // Fallback: URL-i slug kimi istifadə et
-            ChannelLoadData(slug = url, name = "CityNetTV Kanal")
-        }
+        val ld = try { mapper.readValue(url, ChannelLoadData::class.java) }
+                 catch (_: Exception) { ChannelLoadData(slug = url, name = "Kanal") }
 
-        // EPG məlumatını çək
-        val epgItems = api.getEpg(loadData.slug)
-        val currentShow = epgItems.firstOrNull()
+        val epg     = api.getEpg(ld.slug)
+        val current = epg.firstOrNull()
 
         val plot = buildString {
-            if (currentShow != null) {
-                append("▶️ İndi: ${currentShow.getDisplayName()}\n")
-                val startTime = currentShow.getStartTime()
-                val endTime = currentShow.getEndTime()
-                if (startTime != null && endTime != null) {
-                    append("⏰ $startTime — $endTime\n")
-                }
-                if (!currentShow.description.isNullOrEmpty()) {
-                    append("\n${currentShow.description}\n")
-                }
+            current?.let {
+                append("▶️ İndi: ${it.getDisplayName()}\n")
+                val s = it.getStartTime(); val e = it.getEndTime()
+                if (s != null && e != null) append("⏰ $s — $e\n")
+                if (!it.description.isNullOrEmpty()) append("\n${it.description}\n")
             }
-            if (epgItems.size > 1) {
-                append("\n📋 Növbəti proqramlar:\n")
-                epgItems.drop(1).take(5).forEach { item ->
-                    append("• ${item.getStartTime() ?: ""} — ${item.getDisplayName()}\n")
-                }
+            if (epg.size > 1) {
+                append("\n📋 Növbəti:\n")
+                epg.drop(1).take(5).forEach { append("• ${it.getStartTime() ?: ""} — ${it.getDisplayName()}\n") }
             }
         }
 
-        // ChannelLoadData-ya show id əlavə et
-        val dataWithShow = loadData.copy(
-            showId = currentShow?.showId ?: currentShow?.id
-        )
+        val dataJson = mapper.writeValueAsString(ld.copy(showId = current?.showId ?: current?.id))
 
-        return LiveStreamLoadResponse(
-            name = loadData.name,
-            url = mapper.writeValueAsString(dataWithShow),
-            apiName = this.name,
-            dataUrl = mapper.writeValueAsString(dataWithShow),
+        return newLiveStreamLoadResponse(
+            name      = ld.name,
+            url       = dataJson,
+            apiName   = this.name,
+            dataUrl   = dataJson,
             posterUrl = null,
-            plot = plot.ifEmpty { "CityNetTV — ${loadData.name}" },
-            tags = listOf("Live", "TV")
+            plot      = plot.ifEmpty { "CityNetTV — ${ld.name}" }
         )
     }
 
-    // ============== STREAM LINKLƏRI ==============
+    // ── LoadLinks ─────────────────────────────────────────────────────────────
 
     override suspend fun loadLinks(
         data: String,
@@ -230,75 +127,27 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        if (!::api.isInitialized) {
-            context?.let { initApi(it) }
-        }
+        if (!::api.isInitialized) context?.let { initApi(it) }
 
-        val loadData = try {
-            mapper.readValue(data, ChannelLoadData::class.java)
-        } catch (e: Exception) {
-            return false
-        }
+        val ld = try { mapper.readValue(data, ChannelLoadData::class.java) } catch (_: Exception) { return false }
+        val sd = api.getStreamData(ld.slug) ?: return false
+        val streamUrl = sd.getStreamUrl() ?: return false
 
-        val streamData = api.getStreamUrl(loadData.slug) ?: return false
-        val streamUrl = streamData.getStreamUrl() ?: return false
+        val isM3u8 = streamUrl.contains(".m3u8")
 
-        // DRM parametrləri
-        val lat = streamData.lat
-        val jwt = streamData.jwt
-        val drmInfo = streamData.drm
-
-        if (drmInfo != null || (!lat.isNullOrEmpty() && !jwt.isNullOrEmpty())) {
-            // Widevine DRM ilə
-            val licenseUrl = drmInfo?.licenseUrl
-                ?: api.buildLicenseUrl(lat, jwt)
-
-            val drmHeaders = mutableMapOf(
-                "User-Agent" to CityNetTVApi.USER_AGENT
-            )
-            drmInfo?.headers?.let { drmHeaders.putAll(it) }
-
-            // Server cycling (api1-api8 arasında)
-            for (serverNum in 1..3) {
-                val serverLicenseUrl = if (drmInfo?.licenseUrl != null) {
-                    drmInfo.licenseUrl
-                } else {
-                    api.buildLicenseUrl(lat, jwt, serverNum)
-                }
-
-                callback.invoke(
-                    ExtractorLink(
-                        source = this.name,
-                        name = "${loadData.name} (Server $serverNum)",
-                        url = streamUrl,
-                        referer = mainUrl,
-                        quality = Qualities.Unknown.value,
-                        isM3u8 = streamUrl.contains(".m3u8"),
-                        headers = mapOf(
-                            "User-Agent" to CityNetTVApi.USER_AGENT,
-                            "Referer" to "$mainUrl/"
-                        )
-                    )
-                )
-            }
-        } else {
-            // Adi stream (DRM olmadan)
+        for (serverNum in 1..3) {
             callback.invoke(
-                ExtractorLink(
-                    source = this.name,
-                    name = loadData.name,
-                    url = streamUrl,
+                newExtractorLink(
+                    source  = this.name,
+                    name    = if (serverNum == 1) ld.name else "${ld.name} S$serverNum",
+                    url     = streamUrl,
                     referer = mainUrl,
                     quality = Qualities.Unknown.value,
-                    isM3u8 = streamUrl.contains(".m3u8"),
-                    headers = mapOf(
-                        "User-Agent" to CityNetTVApi.USER_AGENT,
-                        "Referer" to "$mainUrl/"
-                    )
+                    isM3u8  = isM3u8,
+                    headers = mapOf("User-Agent" to CityNetTVApi.USER_AGENT, "Referer" to "$mainUrl/")
                 )
             )
         }
-
         return true
     }
 }
