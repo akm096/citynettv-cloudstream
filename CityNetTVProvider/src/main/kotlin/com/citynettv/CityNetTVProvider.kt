@@ -137,8 +137,15 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         if (!::api.isInitialized) context?.let { initApi(it) }
 
         val ld = try { mapper.readValue(data, ChannelLoadData::class.java) } catch (_: Exception) { return false }
-        val sd = api.getStreamData(ld.slug) ?: return false
-        val streamUrl = sd.resolveStreamUrl() ?: return false
+        val sd = api.getStreamData(ld.slug)
+        if (sd == null) {
+            app.post(mainUrl) // Optional generic ping
+            return false
+        }
+        val streamUrl = sd.resolveStreamUrl()
+        if (streamUrl.isNullOrEmpty()) {
+            return false
+        }
 
         val isM3u8 = streamUrl.contains(".m3u8")
 
