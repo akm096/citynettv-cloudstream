@@ -286,25 +286,37 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 val possiblePids = listOfNotNull(pid, "0", uid).distinct()
                 var anyV1AttemptFailed = false
 
+                val endpoints = listOf(
+                    "$API_BASE/v1/citynet/users/$uid/profiles/{pid}/channels",
+                    "$API_BASE/v2/citynet/users/$uid/profiles/{pid}/channels",
+                    "$API_BASE/v2/users/$uid/profiles/{pid}/channels",
+                    "$API_BASE/v1/users/$uid/profiles/{pid}/channels"
+                )
+
                 for (testPid in possiblePids) {
-                    try {
-                        val r1 = authGet("$API_BASE/v1/citynet/users/$uid/profiles/$testPid/channels")
-                        if (r1.isSuccessful) {
-                            val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
-                            val list = ch.data ?: ch.channels
-                            if (!list.isNullOrEmpty()) {
-                                // If a fallback PID worked, save it to avoid looping next time
-                                if (testPid != pid) {
-                                    prefs?.edit()?.putString(PREF_PROFILE_ID, testPid)?.apply()
+                    for (endpointPattern in endpoints) {
+                        val url = endpointPattern.replace("{pid}", testPid)
+                        try {
+                            val r1 = authGet(url)
+                            if (r1.isSuccessful) {
+                                val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
+                                val list = ch.data ?: ch.channels
+                                if (!list.isNullOrEmpty()) {
+                                    // If a fallback PID worked, save it to avoid looping next time
+                                    if (testPid != pid) {
+                                        prefs?.edit()?.putString(PREF_PROFILE_ID, testPid)?.apply()
+                                    }
+                                    return list
                                 }
-                                return list
+                            } else {
+                                anyV1AttemptFailed = true
+                                // Record the first segment of the URL path and status code
+                                val variant = url.split("/").take(6).lastOrNull() ?: "url"
+                                lastChannelsError = (lastChannelsError ?: "") + "[$variant-PID_$testPid: ${r1.code}] "
                             }
-                        } else {
-                            anyV1AttemptFailed = true
-                            lastChannelsError = (lastChannelsError ?: "") + "[PID $testPid: ${r1.code}] "
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
                     }
                 }
 
@@ -319,7 +331,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             }
 
             // 2) public list fallback
-            val r2 = authGet("$API_BASE/v2/citynet/channels")
+            val r2 = authGet("$API_BASE/v2/citynet/channels?limit=1000&offset=0")
             if (r2.isSuccessful) {
                 val ch = mapper.readValue(r2.text, ChannelsResponse::class.java)
                 val list = ch.data ?: ch.channels
