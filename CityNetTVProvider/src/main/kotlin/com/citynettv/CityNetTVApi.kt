@@ -286,15 +286,42 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 val possiblePids = listOfNotNull(pid, "0", uid).distinct()
                 var anyV1AttemptFailed = false
 
-                val endpoints = listOf(
+                val endpointsWithPid = listOf(
                     "$API_BASE/v1/citynet/users/$uid/profiles/{pid}/channels",
                     "$API_BASE/v2/citynet/users/$uid/profiles/{pid}/channels",
                     "$API_BASE/v2/users/$uid/profiles/{pid}/channels",
                     "$API_BASE/v1/users/$uid/profiles/{pid}/channels"
                 )
 
+                val endpointsWithoutPid = listOf(
+                    "$API_BASE/v1/citynet/users/$uid/channels",
+                    "$API_BASE/v2/citynet/users/$uid/channels",
+                    "$API_BASE/v1/users/$uid/channels",
+                    "$API_BASE/v2/global/channels"
+                )
+
+                // Try endpoints that don't need a profile ID first, to save requests
+                for (url in endpointsWithoutPid) {
+                    try {
+                        val r1 = authGet(url)
+                        if (r1.isSuccessful) {
+                            val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
+                            val list = ch.data ?: ch.channels
+                            if (!list.isNullOrEmpty()) {
+                                return list
+                            }
+                        } else {
+                            anyV1AttemptFailed = true
+                            val variant = url.split("/").takeLast(2).joinToString("/")
+                            lastChannelsError = (lastChannelsError ?: "") + "[$variant: ${r1.code}] "
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
                 for (testPid in possiblePids) {
-                    for (endpointPattern in endpoints) {
+                    for (endpointPattern in endpointsWithPid) {
                         val url = endpointPattern.replace("{pid}", testPid)
                         try {
                             val r1 = authGet(url)
@@ -330,19 +357,25 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 android.util.Log.w("CityNetTV", "uid is null, falling back to public list")
             }
 
-            // 2) public list fallback
-            val r2 = authGet("$API_BASE/v2/citynet/channels?limit=1000&offset=0")
-            if (r2.isSuccessful) {
-                val ch = mapper.readValue(r2.text, ChannelsResponse::class.java)
-                val list = ch.data ?: ch.channels
-                if (!list.isNullOrEmpty()) return list
-                lastChannelsError = (lastChannelsError ?: "") + " | v2 API boş siyahı qaytardı"
-                return emptyList()
-            } else {
-                lastChannelsError = (lastChannelsError ?: "") + " | v2 API xətası: ${r2.code}"
-                android.util.Log.e("CityNetTV", "getChannels v2 fallback failed: ${r2.code} - ${r2.text}")
+            // 2) public list fallback (test both v1 and v2, with and without query params)
+            val fallbacks = listOf(
+                "$API_BASE/v2/citynet/channels?translation=az",
+                "$API_BASE/v2/citynet/channels",
+                "$API_BASE/v1/citynet/channels"
+            )
+            for (fallback in fallbacks) {
+                val r2 = authGet(fallback)
+                if (r2.isSuccessful) {
+                    val ch = mapper.readValue(r2.text, ChannelsResponse::class.java)
+                    val list = ch.data ?: ch.channels
+                    if (!list.isNullOrEmpty()) return list
+                } else {
+                    val variant = fallback.split("/").takeLast(2).joinToString("/")
+                    lastChannelsError = (lastChannelsError ?: "") + " | fallback [$variant xətası: ${r2.code}]"
+                }
             }
-            emptyList()
+
+            return emptyList()
         } catch (e: Exception) {
             lastChannelsError = "Şəbəkə xətası: ${e.message}"
             e.printStackTrace()
