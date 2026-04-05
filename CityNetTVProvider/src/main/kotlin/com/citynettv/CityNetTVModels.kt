@@ -24,9 +24,9 @@ data class LoginResponse(
     @JsonProperty("user") val rootUser: UserInfo? = null,
     @JsonProperty("error") val error: String? = null
 ) {
-    val accessToken: String? get() = data?.accessToken ?: rootAccessToken
-    val refreshToken: String? get() = data?.refreshToken ?: rootRefreshToken
-    val user: UserInfo? get() = data?.user ?: rootUser
+    fun resolveAccessToken(): String? = data?.accessToken ?: rootAccessToken
+    fun resolveRefreshToken(): String? = data?.refreshToken ?: rootRefreshToken
+    fun resolveUser(): UserInfo? = data?.user ?: rootUser
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -59,8 +59,8 @@ data class RefreshResponse(
     @JsonProperty("access_token") val rootAccessToken: String? = null,
     @JsonProperty("refresh_token") val rootRefreshToken: String? = null
 ) {
-    val accessToken: String? get() = data?.accessToken ?: rootAccessToken
-    val refreshToken: String? get() = data?.refreshToken ?: rootRefreshToken
+    fun resolveAccessToken(): String? = data?.accessToken ?: rootAccessToken
+    fun resolveRefreshToken(): String? = data?.refreshToken ?: rootRefreshToken
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
