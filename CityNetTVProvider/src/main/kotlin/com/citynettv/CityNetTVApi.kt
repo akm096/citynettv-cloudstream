@@ -276,41 +276,46 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             }
         }
         val uid = getUserUid()
-        val pid = getProfileId()
+        var pid = getProfileId()
 
         return try {
-            if (uid != null && pid != null) {
+            if (uid != null) {
                 // 1) user-specific list
-                try {
-                    val r1 = authGet("$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels")
-                    if (r1.isSuccessful) {
-                        val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
-                        val list = ch.data ?: ch.channels
-                        if (!list.isNullOrEmpty()) return list
-                        lastChannelsError = "v1 API boş siyahı qaytardı"
-                    } else {
-                        lastChannelsError = "v1 API xətası: ${r1.code}"
-                        android.util.Log.e("CityNetTV", "getChannels v1 failed: ${r1.code} - ${r1.text}")
+                // UniqCast (the underlying IPTV platform) sometimes doesn't use explicit profiles.
+                // Defaulting to "0" or the "uid" itself often works when pid is missing.
+                val possiblePids = listOfNotNull(pid, "0", uid).distinct()
+                var anyV1AttemptFailed = false
+
+                for (testPid in possiblePids) {
+                    try {
+                        val r1 = authGet("$API_BASE/v1/citynet/users/$uid/profiles/$testPid/channels")
+                        if (r1.isSuccessful) {
+                            val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
+                            val list = ch.data ?: ch.channels
+                            if (!list.isNullOrEmpty()) {
+                                // If a fallback PID worked, save it to avoid looping next time
+                                if (testPid != pid) {
+                                    prefs?.edit()?.putString(PREF_PROFILE_ID, testPid)?.apply()
+                                }
+                                return list
+                            }
+                        } else {
+                            anyV1AttemptFailed = true
+                            lastChannelsError = (lastChannelsError ?: "") + "[PID $testPid: ${r1.code}] "
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                } catch (e: Exception) {
-                    lastChannelsError = "v1 parse xətası: ${e.message}"
-                    e.printStackTrace()
+                }
+
+                if (anyV1AttemptFailed) {
+                    lastChannelsError = "v1 API uğursuz oldu: $lastChannelsError"
+                } else {
+                    lastChannelsError = "v1 API boş siyahı qaytardı."
                 }
             } else {
-                // If we still can't find UID or PID, attach a snippet of the JWT to help debug
-                val token = getAccessToken()
-                var jwtHint = ""
-                if (token != null) {
-                    try {
-                        val parts = token.split(".")
-                        if (parts.size >= 2) {
-                            val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE))
-                            jwtHint = " JWT: ${payload.take(100)}..."
-                        }
-                    } catch (e: Exception) {}
-                }
-                lastChannelsError = "UID ($uid) və ya PID ($pid) tapılmadı.$jwtHint"
-                android.util.Log.w("CityNetTV", "uid or pid is null, falling back to public list")
+                lastChannelsError = "UID ($uid) tapılmadı."
+                android.util.Log.w("CityNetTV", "uid is null, falling back to public list")
             }
 
             // 2) public list fallback
