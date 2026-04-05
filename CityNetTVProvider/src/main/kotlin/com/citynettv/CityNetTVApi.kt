@@ -245,21 +245,33 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     suspend fun getChannels(): List<ChannelData> {
         if (!isLoggedIn()) { if (!login()) return emptyList() }
-        val uid = getUserUid() ?: return emptyList()
-        val pid = getProfileId() ?: return emptyList()
+        val uid = getUserUid()
+        val pid = getProfileId()
+
         return try {
-            // 1) user-specific list
-            val r1 = authGet("$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels")
-            if (r1.isSuccessful) {
-                val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
-                val list = ch.data ?: ch.channels
-                if (!list.isNullOrEmpty()) return list
+            if (uid != null && pid != null) {
+                // 1) user-specific list
+                try {
+                    val r1 = authGet("$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels")
+                    if (r1.isSuccessful) {
+                        val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
+                        val list = ch.data ?: ch.channels
+                        if (!list.isNullOrEmpty()) return list
+                    } else {
+                        android.util.Log.e("CityNetTV", "getChannels v1 failed: ${r1.code} - ${r1.text}")
+                    }
+                } catch (e: Exception) { e.printStackTrace() }
+            } else {
+                android.util.Log.w("CityNetTV", "uid or pid is null, falling back to public list")
             }
+
             // 2) public list fallback
             val r2 = authGet("$API_BASE/v2/citynet/channels?translation=az")
             if (r2.isSuccessful) {
                 val ch = mapper.readValue(r2.text, ChannelsResponse::class.java)
                 return ch.data ?: ch.channels ?: emptyList()
+            } else {
+                android.util.Log.e("CityNetTV", "getChannels v2 fallback failed: ${r2.code} - ${r2.text}")
             }
             emptyList()
         } catch (e: Exception) { e.printStackTrace(); emptyList() }
