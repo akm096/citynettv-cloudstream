@@ -142,8 +142,8 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     password = pass,
                     device = currentDeviceId,
                     // Sending a static deviceClass/Type/Os to ensure consistency
-                    deviceClass = "STB",
-                    deviceType = "ANDROID_TV",
+                    deviceClass = "MOBILE",
+                    deviceType = "SMARTPHONE",
                     deviceOs = "ANDROID"
                 )
             )
