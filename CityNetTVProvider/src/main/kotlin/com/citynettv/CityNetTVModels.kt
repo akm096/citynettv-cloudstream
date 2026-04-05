@@ -37,6 +37,16 @@ data class LoginData(
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
+data class Attachment(
+    @JsonProperty("name") val name: String? = null,
+    @JsonProperty("value") val value: String? = null,
+    @JsonProperty("url") val url: String? = null
+) {
+    // Some APIs use `url` instead of `value` inside attachments
+    val resolvedValue: String? get() = value ?: url
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class UserInfo(
     @JsonProperty("uid") val uid: String? = null,
     @JsonProperty("id") val id: String? = null,
@@ -98,11 +108,19 @@ data class ChannelData(
     @JsonProperty("language") val language: String? = null,
     @JsonProperty("packages") val packages: List<String>? = null,
     @JsonProperty("number") val number: Int? = null,
-    @JsonProperty("is_hd") val isHd: Boolean? = null
+    @JsonProperty("is_hd") val isHd: Boolean? = null,
+    @JsonProperty("attachments") val attachments: List<Attachment>? = null
 ) {
     fun getDisplayName(): String = name ?: title ?: slug ?: "Unknown"
 
-    fun resolveLogoUrl(): String? = logo ?: logoUrl ?: image ?: imageUrl ?: poster ?: posterUrl
+    fun resolveLogoUrl(): String? {
+        val attachedLogo = attachments?.firstOrNull {
+            it.name?.lowercase()?.contains("logo") == true ||
+            it.resolvedValue?.lowercase()?.contains("logo") == true
+        }?.resolvedValue ?: attachments?.firstOrNull()?.resolvedValue
+
+        return logo ?: logoUrl ?: image ?: imageUrl ?: poster ?: posterUrl ?: attachedLogo
+    }
 
     fun resolveCategory(): String {
         // Return first category/genre found
