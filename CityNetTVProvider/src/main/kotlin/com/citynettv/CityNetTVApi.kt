@@ -88,13 +88,13 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     /**
      * API-dən cihaz sessiyasını silir — device slot-unu azad edir.
      */
-    private suspend fun logoutDevice() {
+    /**
+     * API-dən cihaz sessiyasını silir — device slot-unu azad edir.
+     */
+    private suspend fun logoutDevice(deviceId: String) {
         try {
-            val token = getAccessToken()
-            if (token.isNullOrEmpty()) return
-            val deviceId = prefs?.getString(PREF_DEVICE_ID, null) ?: return
+            // Unregister via v2/global/logout, usually requires the login payload
             android.util.Log.d("CityNetTV", "Köhnə cihaz sessiyası silinir: $deviceId")
-            // Try common logout endpoints
             app.post(
                 "$API_BASE/v2/global/logout",
                 headers = headers(withAuth = true, withAccessKey = false),
@@ -131,11 +131,20 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             // Save credentials early so getDeviceId() can generate correct UUID
             saveCredentials(user, pass)
 
+            val currentDeviceId = getDeviceId()
             // Try to logout old device session first (frees up device slot)
-            logoutDevice()
+            logoutDevice(currentDeviceId)
 
             val body = mapper.writeValueAsString(
-                LoginRequest(username = user, password = pass, device = getDeviceId())
+                LoginRequest(
+                    username = user,
+                    password = pass,
+                    device = currentDeviceId,
+                    // Sending a static deviceClass/Type/Os to ensure consistency
+                    deviceClass = "STB",
+                    deviceType = "ANDROID_TV",
+                    deviceOs = "ANDROID"
+                )
             )
             android.util.Log.d("CityNetTV", "Login request to: $API_BASE/v2/global/login")
             android.util.Log.d("CityNetTV", "Login body: $body")
