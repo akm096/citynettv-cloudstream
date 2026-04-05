@@ -143,7 +143,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     device = currentDeviceId,
                     // Sending a static deviceClass/Type/Os to ensure consistency
                     deviceClass = "MOBILE",
-                    deviceType = "SMARTPHONE",
+                    deviceType = "ANDROID",
                     deviceOs = "ANDROID"
                 )
             )

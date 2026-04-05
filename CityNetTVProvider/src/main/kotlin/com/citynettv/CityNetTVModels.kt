@@ -11,7 +11,7 @@ data class LoginRequest(
     @JsonProperty("password") val password: String,
     @JsonProperty("device") val device: String,
     @JsonProperty("device_class") val deviceClass: String = "MOBILE",
-    @JsonProperty("device_type") val deviceType: String = "SMARTPHONE",
+    @JsonProperty("device_type") val deviceType: String = "ANDROID",
     @JsonProperty("device_os") val deviceOs: String = "ANDROID"
 )
 
