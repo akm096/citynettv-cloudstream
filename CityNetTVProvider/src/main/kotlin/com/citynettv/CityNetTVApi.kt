@@ -390,15 +390,35 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         val uid = getUserUid() ?: return null
         return try {
             val showId = getCurrentShowId(slug)
-            val url = if (showId != null)
-                "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/shows/$showId"
-            else
-                "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/live"
-            val res = authGet(url)
-            if (res.isSuccessful) {
-                val sr = mapper.readValue(res.text, StreamResponse::class.java)
-                sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
-            } else null
+            val pid = getProfileId() ?: "0"
+
+            // Just like channels, streaming endpoints can have different structures depending on the tenant configuration.
+            val possibleEndpoints = if (showId != null) {
+                listOf(
+                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v1/users/$uid/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v2/users/$uid/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/shows/$showId"
+                )
+            } else {
+                listOf(
+                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/live",
+                    "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/live",
+                    "$API_BASE/v1/users/$uid/vod/channels/$slug/live",
+                    "$API_BASE/v2/users/$uid/vod/channels/$slug/live",
+                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/live"
+                )
+            }
+
+            for (url in possibleEndpoints) {
+                val res = authGet(url)
+                if (res.isSuccessful) {
+                    val sr = mapper.readValue(res.text, StreamResponse::class.java)
+                    return sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
+                }
+            }
+            null
         } catch (e: Exception) { e.printStackTrace(); null }
     }
 
