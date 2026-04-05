@@ -243,8 +243,17 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     // ── Channels ──────────────────────────────────────────────────────────────
 
+    var lastChannelsError: String? = null
+        private set
+
     suspend fun getChannels(): List<ChannelData> {
-        if (!isLoggedIn()) { if (!login()) return emptyList() }
+        lastChannelsError = null
+        if (!isLoggedIn()) {
+            if (!login()) {
+                lastChannelsError = "Login failed: ${lastLoginError ?: "Bilinməyən xəta"}"
+                return emptyList()
+            }
+        }
         val uid = getUserUid()
         val pid = getProfileId()
 
@@ -257,11 +266,17 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                         val ch = mapper.readValue(r1.text, ChannelsResponse::class.java)
                         val list = ch.data ?: ch.channels
                         if (!list.isNullOrEmpty()) return list
+                        lastChannelsError = "v1 API boş siyahı qaytardı"
                     } else {
+                        lastChannelsError = "v1 API xətası: ${r1.code}"
                         android.util.Log.e("CityNetTV", "getChannels v1 failed: ${r1.code} - ${r1.text}")
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    lastChannelsError = "v1 parse xətası: ${e.message}"
+                    e.printStackTrace()
+                }
             } else {
+                lastChannelsError = "UID ($uid) və ya PID ($pid) tapılmadı"
                 android.util.Log.w("CityNetTV", "uid or pid is null, falling back to public list")
             }
 
@@ -269,12 +284,20 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val r2 = authGet("$API_BASE/v2/citynet/channels?translation=az")
             if (r2.isSuccessful) {
                 val ch = mapper.readValue(r2.text, ChannelsResponse::class.java)
-                return ch.data ?: ch.channels ?: emptyList()
+                val list = ch.data ?: ch.channels
+                if (!list.isNullOrEmpty()) return list
+                lastChannelsError = (lastChannelsError ?: "") + " | v2 API boş siyahı qaytardı"
+                return emptyList()
             } else {
+                lastChannelsError = (lastChannelsError ?: "") + " | v2 API xətası: ${r2.code}"
                 android.util.Log.e("CityNetTV", "getChannels v2 fallback failed: ${r2.code} - ${r2.text}")
             }
             emptyList()
-        } catch (e: Exception) { e.printStackTrace(); emptyList() }
+        } catch (e: Exception) {
+            lastChannelsError = "Şəbəkə xətası: ${e.message}"
+            e.printStackTrace()
+            emptyList()
+        }
     }
 
     // ── Stream ────────────────────────────────────────────────────────────────
