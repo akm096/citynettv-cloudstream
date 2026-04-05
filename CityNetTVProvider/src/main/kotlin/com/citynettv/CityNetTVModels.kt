@@ -17,10 +17,23 @@ data class LoginRequest(
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class LoginResponse(
+    @JsonProperty("data") val data: LoginData? = null,
+    // Fallbacks just in case API ever returns them at root
+    @JsonProperty("access_token") val rootAccessToken: String? = null,
+    @JsonProperty("refresh_token") val rootRefreshToken: String? = null,
+    @JsonProperty("user") val rootUser: UserInfo? = null,
+    @JsonProperty("error") val error: String? = null
+) {
+    val accessToken: String? get() = data?.accessToken ?: rootAccessToken
+    val refreshToken: String? get() = data?.refreshToken ?: rootRefreshToken
+    val user: UserInfo? get() = data?.user ?: rootUser
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class LoginData(
     @JsonProperty("access_token") val accessToken: String? = null,
     @JsonProperty("refresh_token") val refreshToken: String? = null,
-    @JsonProperty("user") val user: UserInfo? = null,
-    @JsonProperty("error") val error: String? = null
+    @JsonProperty("user") val user: UserInfo? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -42,6 +55,16 @@ data class RefreshRequest(
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class RefreshResponse(
+    @JsonProperty("data") val data: RefreshData? = null,
+    @JsonProperty("access_token") val rootAccessToken: String? = null,
+    @JsonProperty("refresh_token") val rootRefreshToken: String? = null
+) {
+    val accessToken: String? get() = data?.accessToken ?: rootAccessToken
+    val refreshToken: String? get() = data?.refreshToken ?: rootRefreshToken
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class RefreshData(
     @JsonProperty("access_token") val accessToken: String? = null,
     @JsonProperty("refresh_token") val refreshToken: String? = null
 )
