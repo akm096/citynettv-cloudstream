@@ -165,20 +165,32 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     lastLoginError = null
                     return true
                 }
-                lastLoginError = lr.error ?: "Token alınmadı"
+                lastLoginError = lr.error ?: "Token alınmadı: Məlumatlar səhvdir."
             } else {
                 // Parse error response
                 try {
                     val errBody = res.text
                     val errNode = mapper.readTree(errBody)
                     val errCode = errNode?.get("error_code")?.asInt() ?: errNode?.get("code")?.asInt()
-                    val errMsg = errNode?.get("message")?.asText()
+
+                    // The error message can sometimes be nested inside "data" -> "message"
+                    val dataNode = errNode?.get("data")
+                    val errMsg = dataNode?.get("message")?.asText()
+                        ?: errNode?.get("message")?.asText()
                         ?: errNode?.get("error")?.asText()
                         ?: errNode?.get("error_message")?.asText()
 
                     if (errCode == 1067) {
                         lastLoginError = "Cihaz limiti aşılıb. Rəsmi CityNet TV proqramından köhnə cihazları silin və ya Ayarlardan Cihazı Sıfırlayın."
                         android.util.Log.w("CityNetTV", "Device limit aşılıb")
+                        return false
+                    }
+                    if (errCode == 4290) {
+                        lastLoginError = "Çox sayda cəhd etdiniz! Bir neçə dəqiqə gözləyin və yenidən yoxlayın."
+                        return false
+                    }
+                    if (errCode == 3010) {
+                        lastLoginError = "İstifadəçi adı və ya şifrə səhvdir."
                         return false
                     }
 
