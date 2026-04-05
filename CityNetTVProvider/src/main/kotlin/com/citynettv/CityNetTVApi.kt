@@ -392,32 +392,54 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val showId = getCurrentShowId(slug)
             val pid = getProfileId() ?: "0"
 
-            // Just like channels, streaming endpoints can have different structures depending on the tenant configuration.
-            val possibleEndpoints = if (showId != null) {
-                listOf(
+            val liveEndpoints = listOf(
+                "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v1/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v2/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/live",
+                // Endpoints without "vod/"
+                "$API_BASE/v1/citynet/users/$uid/channels/$slug/live",
+                "$API_BASE/v2/citynet/users/$uid/channels/$slug/live",
+                "$API_BASE/v1/users/$uid/channels/$slug/live",
+                "$API_BASE/v2/users/$uid/channels/$slug/live",
+                "$API_BASE/v1/users/$uid/profiles/$pid/channels/$slug/live"
+            )
+
+            val possibleEndpoints = mutableListOf<String>()
+
+            if (showId != null) {
+                possibleEndpoints.addAll(listOf(
                     "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/shows/$showId",
                     "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/shows/$showId",
                     "$API_BASE/v1/users/$uid/vod/channels/$slug/shows/$showId",
                     "$API_BASE/v2/users/$uid/vod/channels/$slug/shows/$showId",
-                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/shows/$showId"
-                )
-            } else {
-                listOf(
-                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v1/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v2/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/live"
-                )
+                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/shows/$showId",
+                    // Endpoints without "vod/"
+                    "$API_BASE/v1/citynet/users/$uid/channels/$slug/shows/$showId",
+                    "$API_BASE/v2/citynet/users/$uid/channels/$slug/shows/$showId",
+                    "$API_BASE/v1/users/$uid/channels/$slug/shows/$showId",
+                    "$API_BASE/v2/users/$uid/channels/$slug/shows/$showId"
+                ))
             }
 
+            // Always fallback to live endpoints if show endpoints fail (or if no showId)
+            possibleEndpoints.addAll(liveEndpoints)
+
+            var lastError = ""
             for (url in possibleEndpoints) {
                 val res = authGet(url)
                 if (res.isSuccessful) {
                     val sr = mapper.readValue(res.text, StreamResponse::class.java)
-                    return sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
+                    val streamUrl = sr.data?.resolveStreamUrl() ?: sr.streamUrl ?: sr.url
+                    if (!streamUrl.isNullOrEmpty()) {
+                        return sr.data ?: StreamData(url = streamUrl)
+                    }
+                } else {
+                    lastError = "HTTP ${res.code}"
                 }
             }
+            android.util.Log.e("CityNetTV", "All stream endpoints failed. Last error: $lastError")
             null
         } catch (e: Exception) { e.printStackTrace(); null }
     }
