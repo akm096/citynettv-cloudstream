@@ -262,6 +262,15 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         return res
     }
 
+    private suspend fun authPost(url: String, retried: Boolean = false): com.lagradost.nicehttp.NiceResponse {
+        val res = app.post(url, headers = headers(), requestBody = "{}".toOkHttpBody())
+        if (res.code == 401 && !retried) {
+            refreshToken()
+            return authPost(url, true)
+        }
+        return res
+    }
+
     // ── Channels ──────────────────────────────────────────────────────────────
 
     var lastChannelsError: String? = null
@@ -388,36 +397,69 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     suspend fun getStreamData(slug: String): StreamData? {
         if (!isLoggedIn()) { if (!login()) return null }
         val uid = getUserUid() ?: return null
+        val deviceId = getDeviceId()
         return try {
             val showId = getCurrentShowId(slug)
             val pid = getProfileId() ?: "0"
 
             // Just like channels, streaming endpoints can have different structures depending on the tenant configuration.
-            val possibleEndpoints = if (showId != null) {
-                listOf(
-                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/shows/$showId",
+            val possibleEndpoints = mutableListOf<String>()
+
+            if (showId != null) {
+                possibleEndpoints.addAll(listOf(
+                    "$API_BASE/v2/citynet/users/$uid/devices/$deviceId/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v1/citynet/users/$uid/devices/$deviceId/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v2/users/$uid/devices/$deviceId/channels/$slug/shows/$showId/stream",
+                    "$API_BASE/v1/users/$uid/devices/$deviceId/channels/$slug/shows/$showId/stream",
                     "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/shows/$showId",
-                    "$API_BASE/v1/users/$uid/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/shows/$showId",
                     "$API_BASE/v2/users/$uid/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v1/users/$uid/vod/channels/$slug/shows/$showId",
                     "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/shows/$showId"
-                )
-            } else {
-                listOf(
-                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v1/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v2/users/$uid/vod/channels/$slug/live",
-                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/live"
-                )
+                ))
             }
 
+            possibleEndpoints.addAll(listOf(
+                "$API_BASE/v2/citynet/users/$uid/devices/$deviceId/channels/$slug/stream",
+                "$API_BASE/v1/citynet/users/$uid/devices/$deviceId/channels/$slug/stream",
+                "$API_BASE/v2/users/$uid/devices/$deviceId/channels/$slug/stream",
+                "$API_BASE/v1/users/$uid/devices/$deviceId/channels/$slug/stream",
+                "$API_BASE/v2/citynet/users/$uid/channels/$slug/stream",
+                "$API_BASE/v1/citynet/users/$uid/channels/$slug/stream",
+                "$API_BASE/v2/users/$uid/channels/$slug/stream",
+                "$API_BASE/v1/users/$uid/channels/$slug/stream",
+                "$API_BASE/v2/citynet/devices/$deviceId/channels/$slug/stream",
+                "$API_BASE/v1/citynet/devices/$deviceId/channels/$slug/stream",
+                "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v2/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v1/users/$uid/vod/channels/$slug/live",
+                "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/live"
+            ))
+
+            var lastError = ""
+
             for (url in possibleEndpoints) {
-                val res = authGet(url)
-                if (res.isSuccessful) {
-                    val sr = mapper.readValue(res.text, StreamResponse::class.java)
-                    return sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
+                // Some implementations require POST for streams, others GET. Try GET first, then POST if 405 Method Not Allowed.
+                try {
+                    var res = authGet(url)
+                    if (res.code == 405) {
+                        res = authPost(url)
+                    }
+                    if (res.isSuccessful) {
+                        android.util.Log.d("CityNetTV", "Stream API Success: $url")
+                        val sr = mapper.readValue(res.text, StreamResponse::class.java)
+                        return sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
+                    } else {
+                        val variant = url.split("/").takeLast(4).joinToString("/")
+                        lastError += "[$variant: ${res.code}] "
+                        android.util.Log.d("CityNetTV", "Stream API Failed: $url - Code: ${res.code}")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("CityNetTV", "Stream API Exception: $url - ${e.message}")
                 }
             }
+            android.util.Log.e("CityNetTV", "All stream endpoints failed. Errors: $lastError")
             null
         } catch (e: Exception) { e.printStackTrace(); null }
     }
