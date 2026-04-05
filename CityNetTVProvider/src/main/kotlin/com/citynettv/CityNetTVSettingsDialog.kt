@@ -38,6 +38,16 @@ object CityNetTVSettingsDialog {
         }
         root.addView(statusView)
 
+        // ── Device ID ─────────────────────────────────
+        val apiInstance = CityNetTVApi(prefs)
+        val deviceIdView = TextView(context).apply {
+            text = "Cihaz ID: ${apiInstance.getDeviceId()}"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 16)
+        }
+        root.addView(deviceIdView)
+
         // ── Username ──────────────────────────────────
         root.addView(TextView(context).apply {
             text = "İstifadəçi adı (telefon / email)"
@@ -79,7 +89,7 @@ object CityNetTVSettingsDialog {
 
         // ── Reset device button ───────────────────────
         val resetBtn = Button(context).apply {
-            text = "🔄 Cihazı sıfırla (limit xətası üçün)"
+            text = "🔄 Yeni cihaz ID yarat"
             textSize = 12f
             setPadding(16, 16, 16, 16)
             setOnClickListener {
@@ -90,10 +100,10 @@ object CityNetTVSettingsDialog {
                     .remove("citynettv_refresh_token")
                     .remove("citynettv_user_uid")
                     .remove("citynettv_profile_id")
-                    .remove("citynettv_device_id")
                     .apply()
                 statusView.text = "❌ Giriş edilməyib"
-                msgView.text = "✅ Cihaz ID sıfırlandı! İndi yenidən Giriş Et düyməsinə basın."
+                deviceIdView.text = "Cihaz ID: ${api.getDeviceId()}"
+                msgView.text = "✅ Yeni cihaz ID yaradıldı! İndi yenidən Giriş Et düyməsinə basın."
             }
         }
         root.addView(resetBtn)
@@ -107,17 +117,14 @@ object CityNetTVSettingsDialog {
             .setView(scroll)
             .setPositiveButton("Giriş Et", null)   // handler set later to prevent auto-dismiss
             .setNeutralButton("Çıxış") { _, _ ->
-                val api = CityNetTVApi(prefs)
-                api.resetDeviceId()
                 prefs.edit()
                     .remove("citynettv_access_token")
                     .remove("citynettv_refresh_token")
                     .remove("citynettv_user_uid")
                     .remove("citynettv_profile_id")
-                    .remove("citynettv_device_id")
                     .apply()
                 statusView.text = "❌ Giriş edilməyib"
-                msgView.text = "Çıxış edildi, cihaz sıfırlandı."
+                msgView.text = "Çıxış edildi."
             }
             .setNegativeButton("Bağla", null)
             .create()
@@ -134,13 +141,12 @@ object CityNetTVSettingsDialog {
                 return@setOnClickListener
             }
 
-            // Save credentials and clear old device/token data
+            // Save credentials and clear old token data
             prefs.edit()
                 .putString("citynettv_username", user)
                 .putString("citynettv_password", pass)
                 .remove("citynettv_access_token")
                 .remove("citynettv_refresh_token")
-                .remove("citynettv_device_id")  // Clear old random device ID
                 .apply()
 
             msgView.text = "🔄 Giriş edilir..."
