@@ -158,10 +158,12 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             android.util.Log.d("CityNetTV", "Login response body: ${res.text}")
             if (res.isSuccessful) {
                 val lr = mapper.readValue(res.text, LoginResponse::class.java)
-                if (!lr.accessToken.isNullOrEmpty()) {
-                    saveTokens(lr.accessToken, lr.refreshToken)
-                    val pid = lr.user?.profiles?.firstOrNull()?.id ?: lr.user?.profileId
-                    saveUserInfo(lr.user?.uid, pid)
+                val token = lr.resolveAccessToken()
+                if (!token.isNullOrEmpty()) {
+                    saveTokens(token, lr.resolveRefreshToken())
+                    val u = lr.resolveUser()
+                    val pid = u?.profiles?.firstOrNull()?.id ?: u?.profileId
+                    saveUserInfo(u?.uid, pid)
                     lastLoginError = null
                     return true
                 }
@@ -220,8 +222,9 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             )
             if (res.isSuccessful) {
                 val rr = mapper.readValue(res.text, RefreshResponse::class.java)
-                if (!rr.accessToken.isNullOrEmpty()) {
-                    saveTokens(rr.accessToken, rr.refreshToken ?: rt)
+                val token = rr.resolveAccessToken()
+                if (!token.isNullOrEmpty()) {
+                    saveTokens(token, rr.resolveRefreshToken() ?: rt)
                     return true
                 }
             }
