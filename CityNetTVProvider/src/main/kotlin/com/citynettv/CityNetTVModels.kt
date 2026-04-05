@@ -39,6 +39,7 @@ data class LoginData(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class UserInfo(
     @JsonProperty("uid") val uid: String? = null,
+    @JsonProperty("id") val id: String? = null,
     @JsonProperty("profile_id") val profileId: String? = null,
     @JsonProperty("profiles") val profiles: List<Profile>? = null
 )

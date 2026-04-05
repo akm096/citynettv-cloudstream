@@ -162,8 +162,29 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 if (!token.isNullOrEmpty()) {
                     saveTokens(token, lr.resolveRefreshToken())
                     val u = lr.resolveUser()
-                    val pid = u?.profiles?.firstOrNull()?.id ?: u?.profileId
-                    saveUserInfo(u?.uid, pid)
+                    var resolvedUid = u?.uid ?: u?.id
+                    var resolvedPid = u?.profiles?.firstOrNull()?.id ?: u?.profileId
+
+                    // Decode JWT token to extract missing user info if needed
+                    if (resolvedUid == null || resolvedPid == null) {
+                        try {
+                            val parts = token.split(".")
+                            if (parts.size >= 2) {
+                                val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE))
+                                val jwtNode = mapper.readTree(payload)
+                                if (resolvedUid == null) {
+                                    resolvedUid = jwtNode.get("uid")?.asText() ?: jwtNode.get("sub")?.asText() ?: jwtNode.get("user_id")?.asText() ?: jwtNode.get("id")?.asText()
+                                }
+                                if (resolvedPid == null) {
+                                    resolvedPid = jwtNode.get("profile_id")?.asText() ?: jwtNode.get("pid")?.asText()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("CityNetTV", "JWT Decode error: ${e.message}")
+                        }
+                    }
+
+                    saveUserInfo(resolvedUid, resolvedPid)
                     lastLoginError = null
                     return true
                 }
@@ -276,12 +297,24 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     e.printStackTrace()
                 }
             } else {
-                lastChannelsError = "UID ($uid) və ya PID ($pid) tapılmadı"
+                // If we still can't find UID or PID, attach a snippet of the JWT to help debug
+                val token = getAccessToken()
+                var jwtHint = ""
+                if (token != null) {
+                    try {
+                        val parts = token.split(".")
+                        if (parts.size >= 2) {
+                            val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE))
+                            jwtHint = " JWT: ${payload.take(100)}..."
+                        }
+                    } catch (e: Exception) {}
+                }
+                lastChannelsError = "UID ($uid) və ya PID ($pid) tapılmadı.$jwtHint"
                 android.util.Log.w("CityNetTV", "uid or pid is null, falling back to public list")
             }
 
             // 2) public list fallback
-            val r2 = authGet("$API_BASE/v2/citynet/channels?translation=az")
+            val r2 = authGet("$API_BASE/v2/citynet/channels")
             if (r2.isSuccessful) {
                 val ch = mapper.readValue(r2.text, ChannelsResponse::class.java)
                 val list = ch.data ?: ch.channels
