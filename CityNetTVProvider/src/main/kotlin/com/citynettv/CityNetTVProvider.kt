@@ -33,8 +33,12 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
 
         val all = api.getChannels()
         if (all.isEmpty()) {
-            val message = if (!isLoggedIn) "⚠️ Giriş edin (Ayarlar → CityNetTV)"
-                          else "⚠️ Kanallar yüklənmədi. İnterneti yoxlayın və ya təkrar daxil olun."
+            val message = if (!isLoggedIn) {
+                "⚠️ Giriş edin (Ayarlar → CityNetTV)"
+            } else {
+                val err = api.lastChannelsError ?: "Bilinməyən xəta"
+                "⚠️ Kanallar yüklənmədi ($err). Təkrar daxil olun."
+            }
             return newHomePageResponse(
                 listOf(HomePageList(message, emptyList(), isHorizontalImages = true))
             )
