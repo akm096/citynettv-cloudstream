@@ -49,9 +49,10 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         // Generate a new deterministic device ID using the username
         val user = getUsername()
         id = if (!user.isNullOrEmpty()) {
-            UUID.nameUUIDFromBytes("CityNetTV-CS-$user".toByteArray()).toString()
+            // Some systems expect a 16-character hex string for Android IDs
+            UUID.nameUUIDFromBytes("CityNetTV-CS-$user".toByteArray()).toString().replace("-", "").substring(0, 16)
         } else {
-            UUID.randomUUID().toString()
+            UUID.randomUUID().toString().replace("-", "").substring(0, 16)
         }
         prefs?.edit()?.putString(PREF_DEVICE_ID, id)?.apply()
         return id
@@ -62,7 +63,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
      * "Cihaz limiti aşılıb" xətası olduqda istifadəçi tərəfindən çağırılır.
      */
     fun resetDeviceId() {
-        val newId = UUID.randomUUID().toString()
+        val newId = UUID.randomUUID().toString().replace("-", "").substring(0, 16)
         prefs?.edit()?.putString(PREF_DEVICE_ID, newId)?.apply()
         android.util.Log.d("CityNetTV", "Device ID sıfırlandı, yeni ID: $newId")
     }
