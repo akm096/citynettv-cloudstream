@@ -362,5 +362,6 @@ data class EpgItem(
 data class ChannelLoadData(
     @JsonProperty("slug") val slug: String,
     @JsonProperty("name") val name: String,
+    @JsonProperty("id") val id: String? = null,
     @JsonProperty("showId") val showId: String? = null
 )

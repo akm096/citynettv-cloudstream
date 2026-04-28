@@ -389,43 +389,56 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     // ── Stream ────────────────────────────────────────────────────────────────
 
-    suspend fun getStreamData(slug: String, preferredShowId: String? = null): StreamData? {
+    suspend fun getStreamData(slug: String, id: String? = null, preferredShowId: String? = null): StreamData? {
         if (!isLoggedIn()) { if (!login()) return null }
         val uid = getUserUid() ?: return null
         return try {
             val showId = preferredShowId ?: getCurrentShowId(slug)
             val pid = getProfileId() ?: "0"
 
-            val liveEndpoints = listOf(
-                "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/live",
-                "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/live",
-                "$API_BASE/v1/users/$uid/vod/channels/$slug/live",
-                "$API_BASE/v2/users/$uid/vod/channels/$slug/live",
-                "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/live",
-                // Endpoints without "vod/"
-                "$API_BASE/v1/citynet/users/$uid/channels/$slug/live",
-                "$API_BASE/v2/citynet/users/$uid/channels/$slug/live",
-                "$API_BASE/v1/users/$uid/channels/$slug/live",
-                "$API_BASE/v2/users/$uid/channels/$slug/live",
-                "$API_BASE/v1/users/$uid/profiles/$pid/channels/$slug/live"
-            )
-
             val possibleEndpoints = mutableListOf<String>()
-            possibleEndpoints.addAll(liveEndpoints)
+            val channelKeys = listOfNotNull(slug, id).filter { it.isNotBlank() }.distinct()
 
-            if (!showId.isNullOrEmpty()) {
+            for (channelKey in channelKeys) {
                 possibleEndpoints.addAll(listOf(
-                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/shows/$showId",
-                    "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/shows/$showId",
-                    "$API_BASE/v1/users/$uid/vod/channels/$slug/shows/$showId",
-                    "$API_BASE/v2/users/$uid/vod/channels/$slug/shows/$showId",
-                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$slug/shows/$showId",
+                    "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/live",
+                    "$API_BASE/v2/citynet/users/$uid/vod/channels/$channelKey/live",
+                    "$API_BASE/v1/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/live",
+                    "$API_BASE/v2/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/live",
+                    "$API_BASE/v1/users/$uid/vod/channels/$channelKey/live",
+                    "$API_BASE/v2/users/$uid/vod/channels/$channelKey/live",
+                    "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$channelKey/live",
+                    "$API_BASE/v2/users/$uid/profiles/$pid/vod/channels/$channelKey/live",
                     // Endpoints without "vod/"
-                    "$API_BASE/v1/citynet/users/$uid/channels/$slug/shows/$showId",
-                    "$API_BASE/v2/citynet/users/$uid/channels/$slug/shows/$showId",
-                    "$API_BASE/v1/users/$uid/channels/$slug/shows/$showId",
-                    "$API_BASE/v2/users/$uid/channels/$slug/shows/$showId"
+                    "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/live",
+                    "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/live",
+                    "$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels/$channelKey/live",
+                    "$API_BASE/v2/citynet/users/$uid/profiles/$pid/channels/$channelKey/live",
+                    "$API_BASE/v1/users/$uid/channels/$channelKey/live",
+                    "$API_BASE/v2/users/$uid/channels/$channelKey/live",
+                    "$API_BASE/v1/users/$uid/profiles/$pid/channels/$channelKey/live",
+                    "$API_BASE/v2/users/$uid/profiles/$pid/channels/$channelKey/live"
                 ))
+
+                if (!showId.isNullOrEmpty()) {
+                    possibleEndpoints.addAll(listOf(
+                        "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v2/citynet/users/$uid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v1/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v2/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v1/users/$uid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v2/users/$uid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v1/users/$uid/profiles/$pid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v2/users/$uid/profiles/$pid/vod/channels/$channelKey/shows/$showId",
+                        // Endpoints without "vod/"
+                        "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v2/citynet/users/$uid/profiles/$pid/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v1/users/$uid/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v2/users/$uid/channels/$channelKey/shows/$showId"
+                    ))
+                }
             }
 
             var lastError = ""
@@ -448,10 +461,9 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         return try {
             val sr = mapper.readValue(text, StreamResponse::class.java)
             val typed = sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
-            if (!typed.resolveStreamUrl().isNullOrEmpty()) return typed
 
             val root = mapper.readTree(text)
-            val streamUrl = findTextValue(
+            val streamUrl = typed.resolveStreamUrl() ?: findTextValue(
                 root,
                 setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src")
             ) { key, value ->
@@ -474,13 +486,15 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val lat = findTextValue(root, setOf("lat"))
             val jwt = findTextValue(root, setOf("jwt", "token"))
             val server = findTextValue(root, setOf("server"))
+            val drm = typed.drm?.takeIf { !it.resolveLicenseUrl().isNullOrEmpty() }
+                ?: if (licenseUrl.isNullOrEmpty()) null else DrmInfo(licenseUrl = licenseUrl)
 
-            StreamData(
-                url = streamUrl,
-                lat = lat,
-                jwt = jwt,
-                server = server,
-                drm = if (licenseUrl.isNullOrEmpty()) null else DrmInfo(licenseUrl = licenseUrl)
+            typed.copy(
+                url = typed.url ?: streamUrl,
+                lat = typed.lat ?: lat,
+                jwt = typed.jwt ?: jwt,
+                server = typed.server ?: server,
+                drm = drm
             )
         } catch (e: Exception) {
             android.util.Log.w("CityNetTV", "Stream parse failed: ${e.message}")

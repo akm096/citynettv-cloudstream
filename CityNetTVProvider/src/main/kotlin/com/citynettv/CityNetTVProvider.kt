@@ -72,7 +72,13 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
     }
 
     private fun toSearchResponse(ch: ChannelData): LiveSearchResponse {
-        val data = mapper.writeValueAsString(ChannelLoadData(slug = ch.slug ?: ch.id ?: "", name = ch.getDisplayName()))
+        val data = mapper.writeValueAsString(
+            ChannelLoadData(
+                slug = ch.slug ?: ch.id ?: "",
+                name = ch.getDisplayName(),
+                id = ch.id
+            )
+        )
         return newLiveSearchResponse(
             name = ch.getDisplayName(),
             url  = data,
@@ -139,7 +145,7 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         if (!::api.isInitialized) context?.let { initApi(it) }
 
         val ld = try { mapper.readValue(data, ChannelLoadData::class.java) } catch (_: Exception) { return false }
-        val sd = api.getStreamData(ld.slug, ld.showId) ?: return false
+        val sd = api.getStreamData(ld.slug, ld.id, ld.showId) ?: return false
         val streamUrl = sd.resolveStreamUrl() ?: return false
 
         val isM3u8 = streamUrl.contains(".m3u8")
