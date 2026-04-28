@@ -550,6 +550,7 @@ data class ChannelLoadData(
     @JsonProperty("name") val name: String,
     @JsonProperty("id") val id: String? = null,
     @JsonProperty("uid") val uid: String? = null,
+    @JsonProperty("poster_url") val posterUrl: String? = null,
     @JsonProperty("showId") val showId: String? = null,
     @JsonProperty("stream") val stream: StreamData? = null
 )

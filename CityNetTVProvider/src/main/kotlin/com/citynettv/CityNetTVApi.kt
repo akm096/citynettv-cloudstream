@@ -422,10 +422,20 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
             for (channelKey in channelKeys) {
                 possibleEndpoints.addAll(listOf(
-                    "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey?translation=az&requestDrm=true",
+                    "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey?translation=az&format=hls",
+                    "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey?format=hls",
+                    "$API_BASE/v2/citynet/users/$uid/live/channels/$channelKey?format=hls",
                     "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey?translation=az",
                     "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey",
                     "$API_BASE/v2/citynet/users/$uid/live/channels/$channelKey",
+                    "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/stream",
+                    "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/stream",
+                    "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/play",
+                    "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/play",
+                    "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/playback",
+                    "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/playback",
+                    "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/watch",
+                    "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/watch",
                     "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/live",
                     "$API_BASE/v2/citynet/users/$uid/vod/channels/$channelKey/live",
                     "$API_BASE/v1/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/live",
@@ -439,6 +449,10 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/live",
                     "$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels/$channelKey/live",
                     "$API_BASE/v2/citynet/users/$uid/profiles/$pid/channels/$channelKey/live",
+                    "$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels/$channelKey/stream",
+                    "$API_BASE/v2/citynet/users/$uid/profiles/$pid/channels/$channelKey/stream",
+                    "$API_BASE/v1/citynet/users/$uid/profiles/$pid/channels/$channelKey/playback",
+                    "$API_BASE/v2/citynet/users/$uid/profiles/$pid/channels/$channelKey/playback",
                     "$API_BASE/v1/users/$uid/channels/$channelKey/live",
                     "$API_BASE/v2/users/$uid/channels/$channelKey/live",
                     "$API_BASE/v1/users/$uid/profiles/$pid/channels/$channelKey/live",
@@ -447,9 +461,13 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
                 if (!showId.isNullOrEmpty()) {
                     possibleEndpoints.addAll(listOf(
-                        "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/shows/$showId?translation=az&requestDrm=true",
+                        "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/shows/$showId?translation=az&format=hls",
                         "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/shows/$showId",
                         "$API_BASE/v2/citynet/users/$uid/vod/channels/$channelKey/shows/$showId",
+                        "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/shows/$showId/stream",
+                        "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/shows/$showId/stream",
+                        "$API_BASE/v1/citynet/users/$uid/channels/$channelKey/shows/$showId/playback",
+                        "$API_BASE/v2/citynet/users/$uid/channels/$channelKey/shows/$showId/playback",
                         "$API_BASE/v1/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/shows/$showId",
                         "$API_BASE/v2/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/shows/$showId",
                         "$API_BASE/v1/users/$uid/vod/channels/$channelKey/shows/$showId",
@@ -467,7 +485,20 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 }
             }
 
-            val playbackBody = mapper.writeValueAsString(
+            val playbackBodies = listOf(
+                mapOf(
+                    "device" to getDeviceId(),
+                    "device_id" to getDeviceId(),
+                    "profile_id" to pid,
+                    "format" to "hls"
+                ),
+                mapOf(
+                    "device" to getDeviceId(),
+                    "device_id" to getDeviceId(),
+                    "profile_id" to pid,
+                    "drm" to false,
+                    "format" to "hls"
+                ),
                 mapOf(
                     "device" to getDeviceId(),
                     "device_id" to getDeviceId(),
@@ -475,7 +506,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     "drm" to "widevine",
                     "format" to "dash"
                 )
-            )
+            ).map { mapper.writeValueAsString(it) }
             val attempts = mutableListOf<String>()
 
             for (url in possibleEndpoints.distinct()) {
@@ -484,9 +515,12 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 if (getData?.resolveStreamUrl().isNullOrEmpty().not()) return getData
 
                 if ((getRes.isSuccessful && getData == null) || getRes.code in setOf(400, 403, 405, 422)) {
-                    val postRes = authPost(url, playbackBody)
-                    val postData = parseStreamResponse("POST", url, postRes, attempts)
-                    if (postData?.resolveStreamUrl().isNullOrEmpty().not()) return postData
+                    for (playbackBody in playbackBodies) {
+                        val postRes = authPost(url, playbackBody)
+                        val postData = parseStreamResponse("POST", url, postRes, attempts)
+                        if (postData?.resolveStreamUrl().isNullOrEmpty().not()) return postData
+                        if (postRes.code !in setOf(400, 403, 405, 422)) break
+                    }
                 }
             }
 

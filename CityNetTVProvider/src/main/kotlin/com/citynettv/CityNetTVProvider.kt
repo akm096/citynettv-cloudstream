@@ -72,13 +72,14 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
     }
 
     private fun toSearchResponse(ch: ChannelData): LiveSearchResponse {
+        val posterUrl = ch.resolveLogoUrl()
         val data = mapper.writeValueAsString(
             ChannelLoadData(
                 slug = ch.slug ?: ch.uid ?: ch.id ?: "",
                 name = ch.getDisplayName(),
                 id = ch.id,
                 uid = ch.uid,
-                stream = ch.resolveStreamData()
+                posterUrl = posterUrl
             )
         )
         return newLiveSearchResponse(
@@ -86,7 +87,7 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             url  = data,
             type = TvType.Live
         ).apply {
-            this.posterUrl = ch.resolveLogoUrl()
+            this.posterUrl = posterUrl
         }
     }
 
@@ -111,8 +112,8 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
 
         val epg     = api.getEpg(ld.slug)
         val current = epg.firstOrNull()
-        val stream = ld.stream?.takeIf { !it.resolveStreamUrl().isNullOrEmpty() }
-            ?: api.getStreamData(ld.slug, ld.id, ld.uid, current?.showId ?: current?.id)
+        val stream = api.getStreamData(ld.slug, ld.id, ld.uid, current?.showId ?: current?.id)
+            ?: ld.stream?.takeIf { !it.resolveStreamUrl().isNullOrEmpty() }
 
         val plot = buildString {
             current?.let {
@@ -141,6 +142,7 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             dataUrl = dataJson
         ).apply {
             this.plot = (plot + streamError).ifEmpty { "CityNetTV — ${ld.name}" }
+            this.posterUrl = ld.posterUrl
         }
     }
 
@@ -155,8 +157,8 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         if (!::api.isInitialized) context?.let { initApi(it) }
 
         val ld = try { mapper.readValue(data, ChannelLoadData::class.java) } catch (_: Exception) { return false }
-        val sd = ld.stream?.takeIf { !it.resolveStreamUrl().isNullOrEmpty() }
-            ?: api.getStreamData(ld.slug, ld.id, ld.uid, ld.showId)
+        val sd = api.getStreamData(ld.slug, ld.id, ld.uid, ld.showId)
+            ?: ld.stream?.takeIf { !it.resolveStreamUrl().isNullOrEmpty() }
             ?: return false
         val streamUrl = sd.resolveStreamUrl() ?: return false
 
@@ -168,10 +170,14 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             else -> ExtractorLinkType.VIDEO
         }
         val headers = api.playbackHeaders() + mapOf("Referer" to "$mainUrl/")
-        val licenseUrl = sd.drm?.resolveLicenseUrl()
-            ?: api.buildLicenseUrl(sd.lat, sd.jwt, sd.server?.toIntOrNull() ?: 1).takeIf {
-                !sd.lat.isNullOrEmpty() || !sd.jwt.isNullOrEmpty()
-            }
+        val licenseUrl = if (isDash) {
+            sd.drm?.resolveLicenseUrl()
+                ?: api.buildLicenseUrl(sd.lat, sd.jwt, sd.server?.toIntOrNull() ?: 1).takeIf {
+                    !sd.lat.isNullOrEmpty() || !sd.jwt.isNullOrEmpty()
+                }
+        } else {
+            null
+        }
 
         for (serverNum in 1..3) {
             val link = if (!licenseUrl.isNullOrEmpty()) {
