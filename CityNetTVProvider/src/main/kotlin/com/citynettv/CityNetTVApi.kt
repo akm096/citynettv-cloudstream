@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lagradost.cloudstream3.app
+import java.net.URLEncoder
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
@@ -653,20 +654,25 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     fun buildLicenseUrl(lat: String?, jwt: String?, server: Int = 1): String {
         val params = buildList {
-            if (!lat.isNullOrEmpty()) add("lat=$lat")
-            if (!jwt.isNullOrEmpty()) add("jwt=$jwt")
+            if (!lat.isNullOrEmpty()) add("lat=${lat.urlEncode()}")
+            if (!jwt.isNullOrEmpty()) add("jwt=${jwt.urlEncode()}")
         }
         val qs = if (params.isNotEmpty()) "?" + params.joinToString("&") else ""
         return "https://api$server.citynettv.az:11610/drmproxy/wv/license$qs"
     }
 
+    private fun String.urlEncode(): String = URLEncoder.encode(this, "UTF-8")
+
     private fun StreamData.isDrmDash(): Boolean {
         val streamUrl = resolveStreamUrl() ?: return false
+        val isHls = streamUrl.looksLikeHlsStream()
         return streamUrl.contains(".mpd", ignoreCase = true) ||
             streamUrl.contains("/dash", ignoreCase = true) ||
-            !drm?.resolveLicenseUrl().isNullOrEmpty() ||
-            !lat.isNullOrEmpty() ||
-            !jwt.isNullOrEmpty()
+            (!isHls && (
+                !drm?.resolveLicenseUrl().isNullOrEmpty() ||
+                    !lat.isNullOrEmpty() ||
+                    !jwt.isNullOrEmpty()
+                ))
     }
 
     private fun String.looksLikeHlsStream(): Boolean {

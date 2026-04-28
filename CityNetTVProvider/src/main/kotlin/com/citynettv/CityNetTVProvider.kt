@@ -6,9 +6,13 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.newDrmExtractorLink
+import com.lagradost.cloudstream3.utils.CLEARKEY_UUID
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.PLAYREADY_UUID
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.WIDEVINE_UUID
+import java.net.URI
+import java.util.UUID
 
 class CityNetTVProvider(val context: Context? = null) : MainAPI() {
 
@@ -162,51 +166,86 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             ?: return false
         val streamUrl = sd.resolveStreamUrl() ?: return false
 
-        val isM3u8 = streamUrl.contains(".m3u8")
-        val isDash = streamUrl.contains(".mpd")
+        val isM3u8 = streamUrl.contains(".m3u8", ignoreCase = true) ||
+            streamUrl.contains("/hls", ignoreCase = true) ||
+            streamUrl.contains("playlist", ignoreCase = true)
+        val isCencHls = isM3u8 && streamUrl.contains("MPEG-CENC", ignoreCase = true)
+        val isDash = streamUrl.contains(".mpd", ignoreCase = true) ||
+            streamUrl.contains("/dash", ignoreCase = true) ||
+            (!isM3u8 && (
+                !sd.drm?.resolveLicenseUrl().isNullOrEmpty() ||
+                    !sd.lat.isNullOrEmpty() ||
+                    !sd.jwt.isNullOrEmpty()
+                ))
         val linkType = when {
             isM3u8 -> ExtractorLinkType.M3U8
             isDash -> ExtractorLinkType.DASH
             else -> ExtractorLinkType.VIDEO
         }
         val headers = api.playbackHeaders() + mapOf("Referer" to "$mainUrl/")
-        val licenseUrl = if (isDash) {
-            sd.drm?.resolveLicenseUrl()
-                ?: api.buildLicenseUrl(sd.lat, sd.jwt, sd.server?.toIntOrNull() ?: 1).takeIf {
-                    !sd.lat.isNullOrEmpty() || !sd.jwt.isNullOrEmpty()
-                }
+        val explicitLicenseUrl = sd.drm?.resolveLicenseUrl()
+        val needsDrm = isDash || isCencHls || !explicitLicenseUrl.isNullOrEmpty()
+        val generatedLicenseServers = if (needsDrm && explicitLicenseUrl.isNullOrEmpty()) {
+            val preferredServer = sd.server?.toIntOrNull()?.takeIf { it in 1..6 }
+                ?: streamUrl.resolveCitynetApiServer()
+                ?: 1
+            (listOf(preferredServer) + (1..6).filterNot { it == preferredServer }).distinct()
         } else {
-            null
+            emptyList()
         }
+        val licenseUrls = when {
+            !needsDrm -> emptyList()
+            !explicitLicenseUrl.isNullOrEmpty() -> listOf(null to explicitLicenseUrl)
+            else -> generatedLicenseServers.map { it to api.buildLicenseUrl(sd.lat, sd.jwt, it) }
+        }
+        val drmUuid = resolveDrmUuid(sd.drm?.type)
 
-        for (serverNum in 1..3) {
-            val link = if (!licenseUrl.isNullOrEmpty()) {
+        if (licenseUrls.isNotEmpty()) {
+            licenseUrls.forEachIndexed { index, (serverNum, licenseUrl) ->
                 newDrmExtractorLink(
                     source = this.name,
-                    name = if (serverNum == 1) ld.name else "${ld.name} S$serverNum",
+                    name = if (serverNum == null || index == 0) ld.name else "${ld.name} S$serverNum",
                     url = streamUrl,
                     type = linkType,
-                    uuid = WIDEVINE_UUID
+                    uuid = drmUuid
                 ).apply {
                     this.referer = mainUrl
                     this.quality = Qualities.Unknown.value
                     this.headers = headers + (sd.drm?.headers ?: emptyMap())
                     this.licenseUrl = licenseUrl
-                }
-            } else {
-                newExtractorLink(
-                    source = this.name,
-                    name   = if (serverNum == 1) ld.name else "${ld.name} S$serverNum",
-                    url    = streamUrl,
-                    type   = linkType
-                ).apply {
-                    this.referer = mainUrl
-                    this.quality = Qualities.Unknown.value
-                    this.headers = headers
-                }
+                }.also(callback)
             }
-            callback.invoke(link)
+        } else {
+            newExtractorLink(
+                source = this.name,
+                name   = ld.name,
+                url    = streamUrl,
+                type   = linkType
+            ).apply {
+                this.referer = mainUrl
+                this.quality = Qualities.Unknown.value
+                this.headers = headers
+            }.also(callback)
         }
         return true
+    }
+
+    private fun resolveDrmUuid(type: String?): UUID {
+        val normalized = type?.lowercase().orEmpty()
+        return when {
+            normalized.contains("playready") -> PLAYREADY_UUID
+            normalized.contains("clearkey") || normalized.contains("clear_key") -> CLEARKEY_UUID
+            else -> WIDEVINE_UUID
+        }
+    }
+
+    private fun String.resolveCitynetApiServer(): Int? {
+        return runCatching {
+            Regex("""api(\d+)\.citynettv\.az""")
+                .find(URI(this).host.orEmpty())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toIntOrNull()
+        }.getOrNull()
     }
 }
