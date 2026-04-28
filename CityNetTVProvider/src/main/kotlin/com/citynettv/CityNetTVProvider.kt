@@ -170,6 +170,7 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             streamUrl.contains("/hls", ignoreCase = true) ||
             streamUrl.contains("playlist", ignoreCase = true)
         val isCencHls = isM3u8 && streamUrl.contains("MPEG-CENC", ignoreCase = true)
+        if (isCencHls) return false
         val isDash = streamUrl.contains(".mpd", ignoreCase = true) ||
             streamUrl.contains("/dash", ignoreCase = true) ||
             (!isM3u8 && (

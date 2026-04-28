@@ -515,7 +515,9 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 val getRes = authGet(url)
                 val getData = parseStreamResponse("GET", url, getRes, attempts)
                 if (getData?.resolveStreamUrl().isNullOrEmpty().not()) {
-                    if (getData.needsDrmFallback()) {
+                    if (getData.isUnsupportedCencHls()) {
+                        attempts.add("GET ${url.removePrefix(API_BASE)}: CENC-HLS atlandÄ±")
+                    } else if (getData.needsDrmFallback()) {
                         drmDashFallback = drmDashFallback ?: getData
                     } else {
                         return getData
@@ -527,7 +529,9 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                         val postRes = authPost(url, playbackBody)
                         val postData = parseStreamResponse("POST", url, postRes, attempts)
                         if (postData?.resolveStreamUrl().isNullOrEmpty().not()) {
-                            if (postData.needsDrmFallback()) {
+                            if (postData.isUnsupportedCencHls()) {
+                                attempts.add("POST ${url.removePrefix(API_BASE)}: CENC-HLS atlandÄ±")
+                            } else if (postData.needsDrmFallback()) {
                                 drmDashFallback = drmDashFallback ?: postData
                             } else {
                                 return postData
@@ -681,15 +685,17 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     private fun StreamData.needsDrmFallback(): Boolean {
         val streamUrl = resolveStreamUrl() ?: return false
         val isHls = streamUrl.looksLikeHlsStream()
-        val isCencHls = isHls && streamUrl.contains("MPEG-CENC", ignoreCase = true)
         return streamUrl.contains(".mpd", ignoreCase = true) ||
             streamUrl.contains("/dash", ignoreCase = true) ||
-            isCencHls ||
             (!isHls && (
                 !drm?.resolveLicenseUrl().isNullOrEmpty() ||
                     !lat.isNullOrEmpty() ||
                     !jwt.isNullOrEmpty()
                 ))
+    }
+
+    private fun StreamData.isUnsupportedCencHls(): Boolean {
+        return resolveStreamUrl().isCencHlsStream()
     }
 
     private fun String.looksLikeHlsStream(): Boolean {
