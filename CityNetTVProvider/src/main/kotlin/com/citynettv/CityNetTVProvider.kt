@@ -74,9 +74,11 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
     private fun toSearchResponse(ch: ChannelData): LiveSearchResponse {
         val data = mapper.writeValueAsString(
             ChannelLoadData(
-                slug = ch.slug ?: ch.id ?: "",
+                slug = ch.slug ?: ch.uid ?: ch.id ?: "",
                 name = ch.getDisplayName(),
-                id = ch.id
+                id = ch.id,
+                uid = ch.uid,
+                stream = ch.resolveStreamData()
             )
         )
         return newLiveSearchResponse(
@@ -109,6 +111,8 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
 
         val epg     = api.getEpg(ld.slug)
         val current = epg.firstOrNull()
+        val stream = ld.stream?.takeIf { !it.resolveStreamUrl().isNullOrEmpty() }
+            ?: api.getStreamData(ld.slug, ld.id, ld.uid, current?.showId ?: current?.id)
 
         val plot = buildString {
             current?.let {
@@ -123,14 +127,20 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             }
         }
 
-        val dataJson = mapper.writeValueAsString(ld.copy(showId = current?.showId ?: current?.id))
+        val streamError = if (stream == null) "\nStream xÉ™tasÄ±: ${api.lastStreamError ?: "link tapÄ±lmadÄ±"}\n" else ""
+        val dataJson = mapper.writeValueAsString(
+            ld.copy(
+                showId = current?.showId ?: current?.id,
+                stream = stream
+            )
+        )
 
         return newLiveStreamLoadResponse(
             name    = ld.name,
             url     = dataJson,
             dataUrl = dataJson
         ).apply {
-            this.plot = plot.ifEmpty { "CityNetTV — ${ld.name}" }
+            this.plot = (plot + streamError).ifEmpty { "CityNetTV — ${ld.name}" }
         }
     }
 
@@ -145,7 +155,9 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         if (!::api.isInitialized) context?.let { initApi(it) }
 
         val ld = try { mapper.readValue(data, ChannelLoadData::class.java) } catch (_: Exception) { return false }
-        val sd = api.getStreamData(ld.slug, ld.id, ld.showId) ?: return false
+        val sd = ld.stream?.takeIf { !it.resolveStreamUrl().isNullOrEmpty() }
+            ?: api.getStreamData(ld.slug, ld.id, ld.uid, ld.showId)
+            ?: return false
         val streamUrl = sd.resolveStreamUrl() ?: return false
 
         val isM3u8 = streamUrl.contains(".m3u8")

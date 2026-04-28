@@ -2,6 +2,7 @@ package com.citynettv
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.JsonNode
 
 // ============== AUTH MODELS ==============
 
@@ -39,11 +40,18 @@ data class LoginData(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class Attachment(
     @JsonProperty("name") val name: String? = null,
+    @JsonProperty("key") val key: String? = null,
+    @JsonProperty("type") val type: String? = null,
     @JsonProperty("value") val value: String? = null,
-    @JsonProperty("url") val url: String? = null
+    @JsonProperty("url") val url: String? = null,
+    @JsonProperty("src") val src: String? = null,
+    @JsonProperty("link") val link: String? = null,
+    @JsonProperty("path") val path: String? = null,
+    @JsonProperty("file") val file: String? = null
 ) {
     // Some APIs use `url` instead of `value` inside attachments
-    val resolvedValue: String? get() = value ?: url
+    val resolvedName: String? get() = name ?: key ?: type
+    val resolvedValue: String? get() = value ?: url ?: src ?: link ?: path ?: file
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -91,15 +99,27 @@ data class ChannelsResponse(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ChannelData(
     @JsonProperty("id") val id: String? = null,
+    @JsonProperty("uid") val uid: String? = null,
     @JsonProperty("slug") val slug: String? = null,
     @JsonProperty("name") val name: String? = null,
     @JsonProperty("title") val title: String? = null,
     @JsonProperty("logo") val logo: String? = null,
     @JsonProperty("logo_url") val logoUrl: String? = null,
+    @JsonProperty("logo_id") val logoId: String? = null,
+    @JsonProperty("logo_image_id") val logoImageId: String? = null,
     @JsonProperty("image") val image: String? = null,
     @JsonProperty("image_url") val imageUrl: String? = null,
+    @JsonProperty("image_id") val imageId: String? = null,
+    @JsonProperty("big_image_id") val bigImageId: String? = null,
+    @JsonProperty("card_image_id") val cardImageId: String? = null,
+    @JsonProperty("banner_image_id") val bannerImageId: String? = null,
     @JsonProperty("poster") val poster: String? = null,
     @JsonProperty("poster_url") val posterUrl: String? = null,
+    @JsonProperty("poster_id") val posterId: String? = null,
+    @JsonProperty("poster_image_id") val posterImageId: String? = null,
+    @JsonProperty("thumbnail_url") val thumbnailUrl: String? = null,
+    @JsonProperty("icon_id") val iconId: String? = null,
+    @JsonProperty("thumbnail_id") val thumbnailId: String? = null,
     @JsonProperty("categories") val categories: List<String>? = null,
     @JsonProperty("category") val category: String? = null,
     @JsonProperty("genre") val genre: String? = null,
@@ -109,17 +129,54 @@ data class ChannelData(
     @JsonProperty("packages") val packages: List<String>? = null,
     @JsonProperty("number") val number: Int? = null,
     @JsonProperty("is_hd") val isHd: Boolean? = null,
-    @JsonProperty("attachments") val attachments: List<Attachment>? = null
+    @JsonProperty("attachments") val attachments: JsonNode? = null,
+    @JsonProperty("images") val images: JsonNode? = null,
+    @JsonProperty("files") val files: JsonNode? = null,
+    @JsonProperty("url") val url: String? = null,
+    @JsonProperty("stream_url") val streamUrl: String? = null,
+    @JsonProperty("manifest_url") val manifestUrl: String? = null,
+    @JsonProperty("manifest") val manifest: String? = null,
+    @JsonProperty("hls_url") val hlsUrl: String? = null,
+    @JsonProperty("hls") val hls: String? = null,
+    @JsonProperty("dash_url") val dashUrl: String? = null,
+    @JsonProperty("dash") val dash: String? = null,
+    @JsonProperty("mpd") val mpd: String? = null,
+    @JsonProperty("m3u8") val m3u8: String? = null,
+    @JsonProperty("uri") val uri: String? = null,
+    @JsonProperty("drm") val drm: DrmInfo? = null,
+    @JsonProperty("lat") val lat: String? = null,
+    @JsonProperty("jwt") val jwt: String? = null,
+    @JsonProperty("server") val server: String? = null,
+    @JsonProperty("stream") val stream: JsonNode? = null,
+    @JsonProperty("playback") val playback: JsonNode? = null,
+    @JsonProperty("source") val source: JsonNode? = null,
+    @JsonProperty("media") val media: JsonNode? = null
 ) {
-    fun getDisplayName(): String = name ?: title ?: slug ?: "Unknown"
+    fun getDisplayName(): String = name ?: title ?: slug ?: uid ?: "Unknown"
 
     fun resolveLogoUrl(): String? {
-        val attachedLogo = attachments?.firstOrNull {
-            it.name?.lowercase()?.contains("logo") == true ||
-            it.resolvedValue?.lowercase()?.contains("logo") == true
-        }?.resolvedValue ?: attachments?.firstOrNull()?.resolvedValue
+        val attachedLogo = findMediaUrlInNodes(listOf(attachments, images, files))
+        return normalizeMediaUrl(
+            logo ?: logoUrl ?: logoId ?: image ?: imageUrl ?: imageId ?: poster ?: posterUrl ?: posterId
+                ?: logoImageId ?: bigImageId ?: cardImageId ?: bannerImageId ?: posterImageId
+                ?: thumbnailUrl ?: iconId ?: thumbnailId ?: attachedLogo
+        )
+    }
 
-        return logo ?: logoUrl ?: image ?: imageUrl ?: poster ?: posterUrl ?: attachedLogo
+    fun resolveStreamData(): StreamData? {
+        val nested = findStreamDataInNodes(listOf(stream, playback, source, media))
+        if (nested != null) return nested
+
+        val stream = streamUrl ?: manifestUrl ?: manifest ?: hlsUrl ?: hls ?: dashUrl ?: dash ?: mpd ?: m3u8 ?: uri
+            ?: url?.takeIf { looksLikeStreamUrl(it) }
+        if (stream.isNullOrBlank()) return null
+        return StreamData(
+            url = stream,
+            lat = lat,
+            jwt = jwt,
+            drm = drm,
+            server = server
+        )
     }
 
     fun resolveCategory(): String {
@@ -186,6 +243,108 @@ data class ChannelData(
     }
 
     companion object {
+        private val logoKeys = setOf("logo", "icon", "image", "poster", "thumbnail", "thumb")
+        private val streamKeys = setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src", "uri", "url")
+        private val licenseKeys = setOf("license_url", "widevine_license_url", "licenseUrl", "license")
+
+        private fun normalizeMediaUrl(raw: String?): String? {
+            val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+            return when {
+                value.startsWith("http://") || value.startsWith("https://") -> value
+                value.startsWith("//") -> "https:$value"
+                value.startsWith("/") -> "https://tv.citynettv.az$value"
+                value.contains("/") -> "https://tv.citynettv.az/$value"
+                else -> "https://tvapi.citynettv.az:11610/api/client/v1/global/images/$value?accessKey=WkVjNWNscFhORDBLCg=="
+            }
+        }
+
+        private fun findMediaUrlInNodes(nodes: List<JsonNode?>): String? {
+            nodes.forEach { node ->
+                val preferred = findTextValue(node, logoKeys) { _, value -> looksLikeMediaPath(value) }
+                if (!preferred.isNullOrBlank()) return preferred
+            }
+            nodes.forEach { node ->
+                val anyMedia = findTextValue(node, emptySet()) { _, value -> looksLikeMediaPath(value) }
+                if (!anyMedia.isNullOrBlank()) return anyMedia
+            }
+            return null
+        }
+
+        private fun looksLikeMediaPath(value: String): Boolean {
+            val lower = value.lowercase()
+            return (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/") || value.contains("/")) &&
+                listOf(".png", ".jpg", ".jpeg", ".webp", ".svg", "logo", "icon", "poster", "image").any { lower.contains(it) }
+        }
+
+        private fun findStreamDataInNodes(nodes: List<JsonNode?>): StreamData? {
+            nodes.forEach { node ->
+                if (node?.isTextual == true) {
+                    val value = node.asText()
+                    if (looksLikeStreamUrl(value)) return StreamData(url = value)
+                }
+                val streamUrl = findTextValue(node, streamKeys) { key, value ->
+                    looksLikeStreamUrl(value) &&
+                        !key.contains("license", ignoreCase = true) &&
+                        !key.contains("logo", ignoreCase = true) &&
+                        !key.contains("image", ignoreCase = true)
+                }
+                if (!streamUrl.isNullOrBlank()) {
+                    val licenseUrl = findTextValue(node, licenseKeys) { _, value -> value.startsWith("http", ignoreCase = true) }
+                    val lat = findTextValue(node, setOf("lat"))
+                    val jwt = findTextValue(node, setOf("jwt", "token"))
+                    val server = findTextValue(node, setOf("server"))
+                    return StreamData(
+                        url = streamUrl,
+                        lat = lat,
+                        jwt = jwt,
+                        server = server,
+                        drm = if (licenseUrl.isNullOrBlank()) null else DrmInfo(licenseUrl = licenseUrl)
+                    )
+                }
+            }
+            return null
+        }
+
+        private fun looksLikeStreamUrl(value: String): Boolean {
+            val lower = value.lowercase()
+            return value.startsWith("http", ignoreCase = true) &&
+                listOf(".m3u8", ".mpd", "/hls", "/dash", "/live", "/stream", "manifest", "playlist").any { lower.contains(it) }
+        }
+
+        private fun findTextValue(
+            node: JsonNode?,
+            keys: Set<String>,
+            predicate: (key: String, value: String) -> Boolean = { _, value -> value.isNotBlank() }
+        ): String? {
+            if (node == null) return null
+            if (node.isTextual && keys.isEmpty()) {
+                val value = node.asText()
+                if (predicate("", value)) return value
+            }
+            if (node.isObject) {
+                val fields = node.fields()
+                while (fields.hasNext()) {
+                    val (key, valueNode) = fields.next()
+                    if ((keys.isEmpty() || keys.any { it.equals(key, ignoreCase = true) }) && valueNode.isTextual) {
+                        val value = valueNode.asText()
+                        if (predicate(key, value)) return value
+                    }
+                }
+
+                val nested = node.fields()
+                while (nested.hasNext()) {
+                    val found = findTextValue(nested.next().value, keys, predicate)
+                    if (!found.isNullOrEmpty()) return found
+                }
+            } else if (node.isArray) {
+                for (item in node) {
+                    val found = findTextValue(item, keys, predicate)
+                    if (!found.isNullOrEmpty()) return found
+                }
+            }
+            return null
+        }
+
         private fun isAzerbaijaniChannel(name: String): Boolean {
             val azKeywords = listOf(
                 "az tv", "aztv", "idman", "medeniyyet", "space", "cbc", "xezer",
@@ -304,6 +463,7 @@ data class StreamData(
     @JsonProperty("dash") val dash: String? = null,
     @JsonProperty("mpd") val mpd: String? = null,
     @JsonProperty("m3u8") val m3u8: String? = null,
+    @JsonProperty("uri") val uri: String? = null,
     @JsonProperty("file") val file: String? = null,
     @JsonProperty("src") val src: String? = null,
     @JsonProperty("lat") val lat: String? = null,
@@ -313,18 +473,44 @@ data class StreamData(
     @JsonProperty("server") val server: String? = null
 ) {
     fun resolveStreamUrl(): String? =
-        streamUrl ?: manifestUrl ?: manifest ?: hlsUrl ?: hls ?: dashUrl ?: dash ?: mpd ?: m3u8 ?: file ?: src ?: url
+        streamUrl ?: manifestUrl ?: manifest ?: hlsUrl ?: hls ?: dashUrl ?: dash ?: mpd ?: m3u8 ?: uri ?: file ?: src ?: url
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class DrmInfo(
     @JsonProperty("license_url") val licenseUrl: String? = null,
     @JsonProperty("license") val license: String? = null,
+    @JsonProperty("licenseUrl") val camelLicenseUrl: String? = null,
     @JsonProperty("widevine_license_url") val widevineLicenseUrl: String? = null,
     @JsonProperty("type") val type: String? = null,
     @JsonProperty("headers") val headers: Map<String, String>? = null
 ) {
-    fun resolveLicenseUrl(): String? = licenseUrl ?: widevineLicenseUrl ?: license
+    fun resolveLicenseUrl(): String? = licenseUrl ?: camelLicenseUrl ?: widevineLicenseUrl ?: license
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class StreamContainer(
+    @JsonProperty("url") val url: String? = null,
+    @JsonProperty("stream_url") val streamUrl: String? = null,
+    @JsonProperty("manifest_url") val manifestUrl: String? = null,
+    @JsonProperty("manifest") val manifest: String? = null,
+    @JsonProperty("hls_url") val hlsUrl: String? = null,
+    @JsonProperty("hls") val hls: String? = null,
+    @JsonProperty("dash_url") val dashUrl: String? = null,
+    @JsonProperty("dash") val dash: String? = null,
+    @JsonProperty("mpd") val mpd: String? = null,
+    @JsonProperty("m3u8") val m3u8: String? = null,
+    @JsonProperty("uri") val uri: String? = null,
+    @JsonProperty("drm") val drm: DrmInfo? = null,
+    @JsonProperty("lat") val lat: String? = null,
+    @JsonProperty("jwt") val jwt: String? = null,
+    @JsonProperty("server") val server: String? = null
+) {
+    fun resolveStreamData(): StreamData? {
+        val stream = streamUrl ?: manifestUrl ?: manifest ?: hlsUrl ?: hls ?: dashUrl ?: dash ?: mpd ?: m3u8 ?: uri ?: url
+        if (stream.isNullOrBlank()) return null
+        return StreamData(url = stream, lat = lat, jwt = jwt, drm = drm, server = server)
+    }
 }
 
 // ============== EPG MODELS ==============
@@ -363,5 +549,7 @@ data class ChannelLoadData(
     @JsonProperty("slug") val slug: String,
     @JsonProperty("name") val name: String,
     @JsonProperty("id") val id: String? = null,
-    @JsonProperty("showId") val showId: String? = null
+    @JsonProperty("uid") val uid: String? = null,
+    @JsonProperty("showId") val showId: String? = null,
+    @JsonProperty("stream") val stream: StreamData? = null
 )

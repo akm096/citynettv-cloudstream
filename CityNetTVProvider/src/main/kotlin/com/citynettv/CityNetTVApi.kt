@@ -266,6 +266,19 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         return res
     }
 
+    private suspend fun authPost(
+        url: String,
+        body: String,
+        retried: Boolean = false
+    ): com.lagradost.nicehttp.NiceResponse {
+        val res = app.post(url, headers = headers(), requestBody = body.toOkHttpBody())
+        if (res.code == 401 && !retried) {
+            refreshToken()
+            return authPost(url, body, true)
+        }
+        return res
+    }
+
     // ── Channels ──────────────────────────────────────────────────────────────
 
     var lastChannelsError: String? = null
@@ -389,7 +402,11 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     // ── Stream ────────────────────────────────────────────────────────────────
 
-    suspend fun getStreamData(slug: String, id: String? = null, preferredShowId: String? = null): StreamData? {
+    var lastStreamError: String? = null
+        private set
+
+    suspend fun getStreamData(slug: String, id: String? = null, channelUid: String? = null, preferredShowId: String? = null): StreamData? {
+        lastStreamError = null
         if (!isLoggedIn()) { if (!login()) return null }
         val uid = getUserUid() ?: return null
         return try {
@@ -397,10 +414,18 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val pid = getProfileId() ?: "0"
 
             val possibleEndpoints = mutableListOf<String>()
-            val channelKeys = listOfNotNull(slug, id).filter { it.isNotBlank() }.distinct()
+            val channelKeys = listOfNotNull(channelUid, slug, id).filter { it.isNotBlank() }.distinct()
+            if (channelKeys.isEmpty()) {
+                lastStreamError = "Kanal slug/id boÅŸdur"
+                return null
+            }
 
             for (channelKey in channelKeys) {
                 possibleEndpoints.addAll(listOf(
+                    "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey?translation=az&requestDrm=true",
+                    "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey?translation=az",
+                    "$API_BASE/v1/citynet/users/$uid/live/channels/$channelKey",
+                    "$API_BASE/v2/citynet/users/$uid/live/channels/$channelKey",
                     "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/live",
                     "$API_BASE/v2/citynet/users/$uid/vod/channels/$channelKey/live",
                     "$API_BASE/v1/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/live",
@@ -422,6 +447,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
                 if (!showId.isNullOrEmpty()) {
                     possibleEndpoints.addAll(listOf(
+                        "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/shows/$showId?translation=az&requestDrm=true",
                         "$API_BASE/v1/citynet/users/$uid/vod/channels/$channelKey/shows/$showId",
                         "$API_BASE/v2/citynet/users/$uid/vod/channels/$channelKey/shows/$showId",
                         "$API_BASE/v1/citynet/users/$uid/profiles/$pid/vod/channels/$channelKey/shows/$showId",
@@ -441,20 +467,54 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 }
             }
 
-            var lastError = ""
-            for (url in possibleEndpoints) {
-                val res = authGet(url)
-                if (res.isSuccessful) {
-                    val streamData = parseStreamData(res.text)
-                    if (streamData?.resolveStreamUrl().isNullOrEmpty()) continue
-                    return streamData
-                } else {
-                    lastError = "HTTP ${res.code}"
+            val playbackBody = mapper.writeValueAsString(
+                mapOf(
+                    "device" to getDeviceId(),
+                    "device_id" to getDeviceId(),
+                    "profile_id" to pid,
+                    "drm" to "widevine",
+                    "format" to "dash"
+                )
+            )
+            val attempts = mutableListOf<String>()
+
+            for (url in possibleEndpoints.distinct()) {
+                val getRes = authGet(url)
+                val getData = parseStreamResponse("GET", url, getRes, attempts)
+                if (getData?.resolveStreamUrl().isNullOrEmpty().not()) return getData
+
+                if ((getRes.isSuccessful && getData == null) || getRes.code in setOf(400, 403, 405, 422)) {
+                    val postRes = authPost(url, playbackBody)
+                    val postData = parseStreamResponse("POST", url, postRes, attempts)
+                    if (postData?.resolveStreamUrl().isNullOrEmpty().not()) return postData
                 }
             }
-            android.util.Log.e("CityNetTV", "All stream endpoints failed. Last error: $lastError")
+
+            lastStreamError = attempts.takeLast(8).joinToString(" | ").ifBlank { "Stream endpoint tapÄ±lmadÄ±" }
+            android.util.Log.e("CityNetTV", "All stream endpoints failed: $lastStreamError")
             null
         } catch (e: Exception) { e.printStackTrace(); null }
+    }
+
+    private fun parseStreamResponse(
+        method: String,
+        url: String,
+        res: com.lagradost.nicehttp.NiceResponse,
+        attempts: MutableList<String>
+    ): StreamData? {
+        val endpoint = url.removePrefix(API_BASE)
+        return if (res.isSuccessful) {
+            val streamData = parseStreamData(res.text)
+            if (streamData?.resolveStreamUrl().isNullOrEmpty()) {
+                attempts.add("$method $endpoint: boÅŸ")
+                null
+            } else {
+                streamData
+            }
+        } else {
+            attempts.add("$method $endpoint: ${res.code}")
+            null
+        }
     }
 
     private fun parseStreamData(text: String): StreamData? {
@@ -465,7 +525,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val root = mapper.readTree(text)
             val streamUrl = typed.resolveStreamUrl() ?: findTextValue(
                 root,
-                setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src")
+                setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src", "uri")
             ) { key, value ->
                 value.startsWith("http", ignoreCase = true) &&
                     !key.contains("license", ignoreCase = true) &&
@@ -481,7 +541,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
             val licenseUrl = findTextValue(
                 root,
-                setOf("license_url", "widevine_license_url", "license")
+                setOf("license_url", "widevine_license_url", "licenseUrl", "license")
             ) { _, value -> value.startsWith("http", ignoreCase = true) }
             val lat = findTextValue(root, setOf("lat"))
             val jwt = findTextValue(root, setOf("jwt", "token"))
