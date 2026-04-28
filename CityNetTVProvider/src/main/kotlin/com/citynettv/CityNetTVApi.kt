@@ -508,23 +508,38 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 )
             ).map { mapper.writeValueAsString(it) }
             val attempts = mutableListOf<String>()
+            var drmDashFallback: StreamData? = null
 
             for (url in possibleEndpoints.distinct()) {
                 val getRes = authGet(url)
                 val getData = parseStreamResponse("GET", url, getRes, attempts)
-                if (getData?.resolveStreamUrl().isNullOrEmpty().not()) return getData
+                if (getData?.resolveStreamUrl().isNullOrEmpty().not()) {
+                    if (getData.isDrmDash()) {
+                        drmDashFallback = drmDashFallback ?: getData
+                    } else {
+                        return getData
+                    }
+                }
 
                 if ((getRes.isSuccessful && getData == null) || getRes.code in setOf(400, 403, 405, 422)) {
                     for (playbackBody in playbackBodies) {
                         val postRes = authPost(url, playbackBody)
                         val postData = parseStreamResponse("POST", url, postRes, attempts)
-                        if (postData?.resolveStreamUrl().isNullOrEmpty().not()) return postData
+                        if (postData?.resolveStreamUrl().isNullOrEmpty().not()) {
+                            if (postData.isDrmDash()) {
+                                drmDashFallback = drmDashFallback ?: postData
+                            } else {
+                                return postData
+                            }
+                        }
                         if (postRes.code !in setOf(400, 403, 405, 422)) break
                     }
                 }
             }
 
             lastStreamError = attempts.takeLast(8).joinToString(" | ").ifBlank { "Stream endpoint tapÄ±lmadÄ±" }
+            if (drmDashFallback != null) return drmDashFallback
+
             android.util.Log.e("CityNetTV", "All stream endpoints failed: $lastStreamError")
             null
         } catch (e: Exception) { e.printStackTrace(); null }
@@ -557,7 +572,17 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val typed = sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
 
             val root = mapper.readTree(text)
-            val streamUrl = typed.resolveStreamUrl() ?: findTextValue(
+            val hlsUrl = findTextValue(
+                root,
+                setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "m3u8", "file", "src", "uri", "url")
+            ) { key, value ->
+                value.startsWith("http", ignoreCase = true) &&
+                    value.looksLikeHlsStream() &&
+                    !key.contains("license", ignoreCase = true) &&
+                    !key.contains("logo", ignoreCase = true) &&
+                    !key.contains("image", ignoreCase = true)
+            }
+            val streamUrl = hlsUrl ?: typed.resolveStreamUrl() ?: findTextValue(
                 root,
                 setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src", "uri")
             ) { key, value ->
@@ -584,7 +609,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 ?: if (licenseUrl.isNullOrEmpty()) null else DrmInfo(licenseUrl = licenseUrl)
 
             typed.copy(
-                url = typed.url ?: streamUrl,
+                url = streamUrl,
                 lat = typed.lat ?: lat,
                 jwt = typed.jwt ?: jwt,
                 server = typed.server ?: server,
@@ -633,6 +658,21 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         }
         val qs = if (params.isNotEmpty()) "?" + params.joinToString("&") else ""
         return "https://api$server.citynettv.az:11610/drmproxy/wv/license$qs"
+    }
+
+    private fun StreamData.isDrmDash(): Boolean {
+        val streamUrl = resolveStreamUrl() ?: return false
+        return streamUrl.contains(".mpd", ignoreCase = true) ||
+            streamUrl.contains("/dash", ignoreCase = true) ||
+            !drm?.resolveLicenseUrl().isNullOrEmpty() ||
+            !lat.isNullOrEmpty() ||
+            !jwt.isNullOrEmpty()
+    }
+
+    private fun String.looksLikeHlsStream(): Boolean {
+        return contains(".m3u8", ignoreCase = true) ||
+            contains("/hls", ignoreCase = true) ||
+            contains("playlist", ignoreCase = true)
     }
 
     // ── EPG ───────────────────────────────────────────────────────────────────
