@@ -297,21 +297,35 @@ data class StreamData(
     @JsonProperty("url") val url: String? = null,
     @JsonProperty("stream_url") val streamUrl: String? = null,
     @JsonProperty("manifest_url") val manifestUrl: String? = null,
+    @JsonProperty("manifest") val manifest: String? = null,
+    @JsonProperty("hls_url") val hlsUrl: String? = null,
+    @JsonProperty("hls") val hls: String? = null,
+    @JsonProperty("dash_url") val dashUrl: String? = null,
+    @JsonProperty("dash") val dash: String? = null,
+    @JsonProperty("mpd") val mpd: String? = null,
+    @JsonProperty("m3u8") val m3u8: String? = null,
+    @JsonProperty("file") val file: String? = null,
+    @JsonProperty("src") val src: String? = null,
     @JsonProperty("lat") val lat: String? = null,
     @JsonProperty("jwt") val jwt: String? = null,
     @JsonProperty("drm") val drm: DrmInfo? = null,
     @JsonProperty("show_id") val showId: String? = null,
     @JsonProperty("server") val server: String? = null
 ) {
-    fun resolveStreamUrl(): String? = url ?: streamUrl ?: manifestUrl
+    fun resolveStreamUrl(): String? =
+        streamUrl ?: manifestUrl ?: manifest ?: hlsUrl ?: hls ?: dashUrl ?: dash ?: mpd ?: m3u8 ?: file ?: src ?: url
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class DrmInfo(
     @JsonProperty("license_url") val licenseUrl: String? = null,
+    @JsonProperty("license") val license: String? = null,
+    @JsonProperty("widevine_license_url") val widevineLicenseUrl: String? = null,
     @JsonProperty("type") val type: String? = null,
     @JsonProperty("headers") val headers: Map<String, String>? = null
-)
+) {
+    fun resolveLicenseUrl(): String? = licenseUrl ?: widevineLicenseUrl ?: license
+}
 
 // ============== EPG MODELS ==============
 

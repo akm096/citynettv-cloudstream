@@ -1,6 +1,7 @@
 package com.citynettv
 
 import android.content.SharedPreferences
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lagradost.cloudstream3.app
 import okhttp3.MediaType.Companion.toMediaType
@@ -118,6 +119,9 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         if (withAuth) getAccessToken()?.let { h["Authorization"] = "Bearer $it" }
         return h
     }
+
+    fun playbackHeaders(): Map<String, String> =
+        headers().filterKeys { it != "Content-Type" }
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -385,11 +389,11 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     // ── Stream ────────────────────────────────────────────────────────────────
 
-    suspend fun getStreamData(slug: String): StreamData? {
+    suspend fun getStreamData(slug: String, preferredShowId: String? = null): StreamData? {
         if (!isLoggedIn()) { if (!login()) return null }
         val uid = getUserUid() ?: return null
         return try {
-            val showId = getCurrentShowId(slug)
+            val showId = preferredShowId ?: getCurrentShowId(slug)
             val pid = getProfileId() ?: "0"
 
             val liveEndpoints = listOf(
@@ -407,8 +411,9 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             )
 
             val possibleEndpoints = mutableListOf<String>()
+            possibleEndpoints.addAll(liveEndpoints)
 
-            if (showId != null) {
+            if (!showId.isNullOrEmpty()) {
                 possibleEndpoints.addAll(listOf(
                     "$API_BASE/v1/citynet/users/$uid/vod/channels/$slug/shows/$showId",
                     "$API_BASE/v2/citynet/users/$uid/vod/channels/$slug/shows/$showId",
@@ -423,18 +428,13 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 ))
             }
 
-            // Always fallback to live endpoints if show endpoints fail (or if no showId)
-            possibleEndpoints.addAll(liveEndpoints)
-
             var lastError = ""
             for (url in possibleEndpoints) {
                 val res = authGet(url)
                 if (res.isSuccessful) {
-                    val sr = mapper.readValue(res.text, StreamResponse::class.java)
-                    val streamUrl = sr.data?.resolveStreamUrl() ?: sr.streamUrl ?: sr.url
-                    if (!streamUrl.isNullOrEmpty()) {
-                        return sr.data ?: StreamData(url = streamUrl)
-                    }
+                    val streamData = parseStreamData(res.text)
+                    if (streamData?.resolveStreamUrl().isNullOrEmpty()) continue
+                    return streamData
                 } else {
                     lastError = "HTTP ${res.code}"
                 }
@@ -442,6 +442,80 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             android.util.Log.e("CityNetTV", "All stream endpoints failed. Last error: $lastError")
             null
         } catch (e: Exception) { e.printStackTrace(); null }
+    }
+
+    private fun parseStreamData(text: String): StreamData? {
+        return try {
+            val sr = mapper.readValue(text, StreamResponse::class.java)
+            val typed = sr.data ?: StreamData(url = sr.streamUrl ?: sr.url)
+            if (!typed.resolveStreamUrl().isNullOrEmpty()) return typed
+
+            val root = mapper.readTree(text)
+            val streamUrl = findTextValue(
+                root,
+                setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src")
+            ) { key, value ->
+                value.startsWith("http", ignoreCase = true) &&
+                    !key.contains("license", ignoreCase = true) &&
+                    !key.contains("logo", ignoreCase = true) &&
+                    !key.contains("image", ignoreCase = true)
+            } ?: findTextValue(root, setOf("url")) { key, value ->
+                value.startsWith("http", ignoreCase = true) &&
+                    !key.contains("license", ignoreCase = true) &&
+                    !key.contains("logo", ignoreCase = true) &&
+                    !key.contains("image", ignoreCase = true)
+            }
+            if (streamUrl.isNullOrEmpty()) return null
+
+            val licenseUrl = findTextValue(
+                root,
+                setOf("license_url", "widevine_license_url", "license")
+            ) { _, value -> value.startsWith("http", ignoreCase = true) }
+            val lat = findTextValue(root, setOf("lat"))
+            val jwt = findTextValue(root, setOf("jwt", "token"))
+            val server = findTextValue(root, setOf("server"))
+
+            StreamData(
+                url = streamUrl,
+                lat = lat,
+                jwt = jwt,
+                server = server,
+                drm = if (licenseUrl.isNullOrEmpty()) null else DrmInfo(licenseUrl = licenseUrl)
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("CityNetTV", "Stream parse failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun findTextValue(
+        node: JsonNode?,
+        keys: Set<String>,
+        predicate: (key: String, value: String) -> Boolean = { _, value -> value.isNotBlank() }
+    ): String? {
+        if (node == null) return null
+        if (node.isObject) {
+            val fields = node.fields()
+            while (fields.hasNext()) {
+                val (key, valueNode) = fields.next()
+                if (keys.any { it.equals(key, ignoreCase = true) } && valueNode.isTextual) {
+                    val value = valueNode.asText()
+                    if (predicate(key, value)) return value
+                }
+            }
+
+            val nested = node.fields()
+            while (nested.hasNext()) {
+                val found = findTextValue(nested.next().value, keys, predicate)
+                if (!found.isNullOrEmpty()) return found
+            }
+        } else if (node.isArray) {
+            for (item in node) {
+                val found = findTextValue(item, keys, predicate)
+                if (!found.isNullOrEmpty()) return found
+            }
+        }
+        return null
     }
 
     fun buildLicenseUrl(lat: String?, jwt: String?, server: Int = 1): String {

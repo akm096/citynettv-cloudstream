@@ -5,8 +5,10 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.newDrmExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.WIDEVINE_UUID
 
 class CityNetTVProvider(val context: Context? = null) : MainAPI() {
 
@@ -137,31 +139,49 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         if (!::api.isInitialized) context?.let { initApi(it) }
 
         val ld = try { mapper.readValue(data, ChannelLoadData::class.java) } catch (_: Exception) { return false }
-        val sd = api.getStreamData(ld.slug)
-        if (sd == null) {
-            app.post(mainUrl) // Optional generic ping
-            return false
-        }
-        val streamUrl = sd.resolveStreamUrl()
-        if (streamUrl.isNullOrEmpty()) {
-            return false
-        }
+        val sd = api.getStreamData(ld.slug, ld.showId) ?: return false
+        val streamUrl = sd.resolveStreamUrl() ?: return false
 
         val isM3u8 = streamUrl.contains(".m3u8")
+        val isDash = streamUrl.contains(".mpd")
+        val linkType = when {
+            isM3u8 -> ExtractorLinkType.M3U8
+            isDash -> ExtractorLinkType.DASH
+            else -> ExtractorLinkType.VIDEO
+        }
+        val headers = api.playbackHeaders() + mapOf("Referer" to "$mainUrl/")
+        val licenseUrl = sd.drm?.resolveLicenseUrl()
+            ?: api.buildLicenseUrl(sd.lat, sd.jwt, sd.server?.toIntOrNull() ?: 1).takeIf {
+                !sd.lat.isNullOrEmpty() || !sd.jwt.isNullOrEmpty()
+            }
 
         for (serverNum in 1..3) {
-            callback.invoke(
+            val link = if (!licenseUrl.isNullOrEmpty()) {
+                newDrmExtractorLink(
+                    source = this.name,
+                    name = if (serverNum == 1) ld.name else "${ld.name} S$serverNum",
+                    url = streamUrl,
+                    type = linkType,
+                    uuid = WIDEVINE_UUID
+                ).apply {
+                    this.referer = mainUrl
+                    this.quality = Qualities.Unknown.value
+                    this.headers = headers + (sd.drm?.headers ?: emptyMap())
+                    this.licenseUrl = licenseUrl
+                }
+            } else {
                 newExtractorLink(
                     source = this.name,
                     name   = if (serverNum == 1) ld.name else "${ld.name} S$serverNum",
                     url    = streamUrl,
-                    type   = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    type   = linkType
                 ).apply {
                     this.referer = mainUrl
                     this.quality = Qualities.Unknown.value
-                    this.headers = mapOf("User-Agent" to CityNetTVApi.USER_AGENT, "Referer" to "$mainUrl/")
+                    this.headers = headers
                 }
-            )
+            }
+            callback.invoke(link)
         }
         return true
     }
