@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 rootProject.name = "CityNetTV"
 
 include("CityNetTVProvider")
+include("CityNetTVAndroidTV")
