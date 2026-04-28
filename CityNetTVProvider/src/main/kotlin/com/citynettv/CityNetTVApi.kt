@@ -515,25 +515,25 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 val getRes = authGet(url)
                 val getData = parseStreamResponse("GET", url, getRes, attempts)
                 if (getData?.resolveStreamUrl().isNullOrEmpty().not()) {
-                    if (getData.isDrmDash()) {
+                    if (getData.needsDrmFallback()) {
                         drmDashFallback = drmDashFallback ?: getData
                     } else {
                         return getData
                     }
                 }
 
-                if ((getRes.isSuccessful && getData == null) || getRes.code in setOf(400, 403, 405, 422)) {
+                if ((getRes.isSuccessful && (getData == null || getData.needsDrmFallback())) || getRes.code in setOf(400, 403, 405, 422)) {
                     for (playbackBody in playbackBodies) {
                         val postRes = authPost(url, playbackBody)
                         val postData = parseStreamResponse("POST", url, postRes, attempts)
                         if (postData?.resolveStreamUrl().isNullOrEmpty().not()) {
-                            if (postData.isDrmDash()) {
+                            if (postData.needsDrmFallback()) {
                                 drmDashFallback = drmDashFallback ?: postData
                             } else {
                                 return postData
                             }
                         }
-                        if (postRes.code !in setOf(400, 403, 405, 422)) break
+                        if (postRes.code !in setOf(400, 403, 405, 422) && postData?.needsDrmFallback() != true) break
                     }
                 }
             }
@@ -583,19 +583,34 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     !key.contains("logo", ignoreCase = true) &&
                     !key.contains("image", ignoreCase = true)
             }
-            val streamUrl = hlsUrl ?: typed.resolveStreamUrl() ?: findTextValue(
+            val dashUrl = findTextValue(
                 root,
-                setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src", "uri")
+                setOf("dash_url", "dash", "mpd", "manifest_url", "manifest", "stream_url", "url")
             ) { key, value ->
                 value.startsWith("http", ignoreCase = true) &&
+                    value.looksLikeDashStream() &&
                     !key.contains("license", ignoreCase = true) &&
                     !key.contains("logo", ignoreCase = true) &&
                     !key.contains("image", ignoreCase = true)
-            } ?: findTextValue(root, setOf("url")) { key, value ->
-                value.startsWith("http", ignoreCase = true) &&
-                    !key.contains("license", ignoreCase = true) &&
-                    !key.contains("logo", ignoreCase = true) &&
-                    !key.contains("image", ignoreCase = true)
+            }
+            val typedUrl = typed.resolveStreamUrl()
+            val streamUrl = when {
+                hlsUrl.isCencHlsStream() && !dashUrl.isNullOrEmpty() -> dashUrl
+                typedUrl.isCencHlsStream() && !dashUrl.isNullOrEmpty() -> dashUrl
+                else -> hlsUrl ?: typedUrl ?: findTextValue(
+                    root,
+                    setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src", "uri")
+                ) { key, value ->
+                    value.startsWith("http", ignoreCase = true) &&
+                        !key.contains("license", ignoreCase = true) &&
+                        !key.contains("logo", ignoreCase = true) &&
+                        !key.contains("image", ignoreCase = true)
+                } ?: findTextValue(root, setOf("url")) { key, value ->
+                    value.startsWith("http", ignoreCase = true) &&
+                        !key.contains("license", ignoreCase = true) &&
+                        !key.contains("logo", ignoreCase = true) &&
+                        !key.contains("image", ignoreCase = true)
+                }
             }
             if (streamUrl.isNullOrEmpty()) return null
 
@@ -663,11 +678,13 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
     private fun String.urlEncode(): String = URLEncoder.encode(this, "UTF-8")
 
-    private fun StreamData.isDrmDash(): Boolean {
+    private fun StreamData.needsDrmFallback(): Boolean {
         val streamUrl = resolveStreamUrl() ?: return false
         val isHls = streamUrl.looksLikeHlsStream()
+        val isCencHls = isHls && streamUrl.contains("MPEG-CENC", ignoreCase = true)
         return streamUrl.contains(".mpd", ignoreCase = true) ||
             streamUrl.contains("/dash", ignoreCase = true) ||
+            isCencHls ||
             (!isHls && (
                 !drm?.resolveLicenseUrl().isNullOrEmpty() ||
                     !lat.isNullOrEmpty() ||
@@ -679,6 +696,15 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         return contains(".m3u8", ignoreCase = true) ||
             contains("/hls", ignoreCase = true) ||
             contains("playlist", ignoreCase = true)
+    }
+
+    private fun String.looksLikeDashStream(): Boolean {
+        return contains(".mpd", ignoreCase = true) ||
+            contains("/dash", ignoreCase = true)
+    }
+
+    private fun String?.isCencHlsStream(): Boolean {
+        return this?.looksLikeHlsStream() == true && contains("MPEG-CENC", ignoreCase = true)
     }
 
     // ── EPG ───────────────────────────────────────────────────────────────────
