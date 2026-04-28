@@ -1,9 +1,10 @@
-package com.citynettv
+﻿package com.citynettv
 
 import android.content.SharedPreferences
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lagradost.cloudstream3.app
+import java.net.URI
 import java.net.URLEncoder
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -22,13 +23,55 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         private const val PREF_USER_UID      = "citynettv_user_uid"
         private const val PREF_PROFILE_ID    = "citynettv_profile_id"
         private const val PREF_DEVICE_ID     = "citynettv_device_id"
+        private const val PREF_DEVICE_PROFILE = "citynettv_device_profile"
         private const val PREF_USERNAME      = "citynettv_username"
         private const val PREF_PASSWORD      = "citynettv_password"
+
+        private val MOBILE_PROFILE = DeviceProfile(
+            key = "mobile",
+            deviceClass = "MOBILE",
+            deviceType = "ANDROID",
+            deviceOs = "ANDROID",
+            userAgent = "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36"
+        )
+        private val DESKTOP_PROFILE = DeviceProfile(
+            key = "desktop",
+            deviceClass = "DESKTOP",
+            deviceType = "WEB",
+            deviceOs = "WEB",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        private val DEVICE_PROFILES = listOf(MOBILE_PROFILE, DESKTOP_PROFILE)
     }
 
     private val mapper = jacksonObjectMapper()
 
-    // ── Credentials ──────────────────────────────────────────────────────────
+    data class DeviceProfile(
+        val key: String,
+        val deviceClass: String,
+        val deviceType: String,
+        val deviceOs: String,
+        val userAgent: String
+    )
+
+    data class StreamDiagnostic(
+        val method: String,
+        val endpoint: String,
+        val code: Int,
+        val profile: String,
+        val streamType: String? = null,
+        val server: String? = null,
+        val note: String? = null
+    ) {
+        override fun toString(): String {
+            val type = streamType?.let { " $it" }.orEmpty()
+            val srv = server?.let { " api$it" }.orEmpty()
+            val suffix = note?.let { " - $it" }.orEmpty()
+            return "$method $endpoint: $code [$profile$type$srv]$suffix"
+        }
+    }
+
+    // â”€â”€ Credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fun saveCredentials(username: String, password: String) {
         prefs?.edit()?.putString(PREF_USERNAME, username)?.putString(PREF_PASSWORD, password)?.apply()
@@ -42,6 +85,19 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     private fun getRefreshToken(): String? = prefs?.getString(PREF_REFRESH_TOKEN, null)
     fun getUserUid(): String? = prefs?.getString(PREF_USER_UID, null)
     fun getProfileId(): String? = prefs?.getString(PREF_PROFILE_ID, null)
+    fun getDeviceProfileKey(): String = prefs?.getString(PREF_DEVICE_PROFILE, MOBILE_PROFILE.key) ?: MOBILE_PROFILE.key
+
+    private fun getDeviceProfile(): DeviceProfile =
+        DEVICE_PROFILES.firstOrNull { it.key == getDeviceProfileKey() } ?: MOBILE_PROFILE
+
+    private fun saveDeviceProfile(profile: DeviceProfile) {
+        prefs?.edit()?.putString(PREF_DEVICE_PROFILE, profile.key)?.apply()
+    }
+
+    private fun loginProfiles(): List<DeviceProfile> {
+        val preferred = getDeviceProfile()
+        return (listOf(preferred) + DEVICE_PROFILES).distinctBy { it.key }
+    }
 
     fun getDeviceId(): String {
         // Use saved device ID if available
@@ -61,13 +117,13 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     }
 
     /**
-     * Cihaz ID-ni yeniləyir.
-     * "Cihaz limiti aşılıb" xətası olduqda istifadəçi tərəfindən çağırılır.
+     * Cihaz ID-ni yenilÉ™yir.
+     * "Cihaz limiti aÅŸÄ±lÄ±b" xÉ™tasÄ± olduqda istifadÉ™Ã§i tÉ™rÉ™findÉ™n Ã§aÄŸÄ±rÄ±lÄ±r.
      */
     fun resetDeviceId() {
         val newId = UUID.randomUUID().toString().replace("-", "").substring(0, 16)
         prefs?.edit()?.putString(PREF_DEVICE_ID, newId)?.apply()
-        android.util.Log.d("CityNetTV", "Device ID sıfırlandı, yeni ID: $newId")
+        android.util.Log.d("CityNetTV", "Device ID sÄ±fÄ±rlandÄ±, yeni ID: $newId")
     }
 
     private fun saveTokens(access: String?, refresh: String?) {
@@ -84,20 +140,21 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         prefs?.edit()
             ?.remove(PREF_ACCESS_TOKEN)?.remove(PREF_REFRESH_TOKEN)
             ?.remove(PREF_USER_UID)?.remove(PREF_PROFILE_ID)
+            ?.remove(PREF_DEVICE_PROFILE)
             // PREF_DEVICE_ID is deliberately NOT removed to keep it persistent across sessions
             ?.apply()
     }
 
     /**
-     * API-dən cihaz sessiyasını silir — device slot-unu azad edir.
+     * API-dÉ™n cihaz sessiyasÄ±nÄ± silir â€” device slot-unu azad edir.
      */
     /**
-     * API-dən cihaz sessiyasını silir — device slot-unu azad edir.
+     * API-dÉ™n cihaz sessiyasÄ±nÄ± silir â€” device slot-unu azad edir.
      */
     private suspend fun logoutDevice(deviceId: String) {
         try {
             // Unregister via v2/global/logout, usually requires the login payload
-            android.util.Log.d("CityNetTV", "Köhnə cihaz sessiyası silinir: $deviceId")
+            android.util.Log.d("CityNetTV", "KÃ¶hnÉ™ cihaz sessiyasÄ± silinir: $deviceId")
             app.post(
                 "$API_BASE/v2/global/logout",
                 headers = headers(withAuth = true, withAccessKey = false),
@@ -108,14 +165,19 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         }
     }
 
-    // ── Headers ───────────────────────────────────────────────────────────────
+    // â”€â”€ Headers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private fun headers(withAuth: Boolean = true, withAccessKey: Boolean = true): Map<String, String> {
+        val profile = getDeviceProfile()
         val h = mutableMapOf(
-            "User-Agent"   to USER_AGENT,
+            "User-Agent"   to profile.userAgent,
             "Accept"       to "application/json",
             "Content-Type" to "application/json"
         )
+        if (profile.key == DESKTOP_PROFILE.key) {
+            h["Origin"] = "https://tv.citynettv.az"
+            h["Referer"] = "https://tv.citynettv.az/"
+        }
         if (withAccessKey) h["Access-Key"] = ACCESS_KEY
         if (withAuth) getAccessToken()?.let { h["Authorization"] = "Bearer $it" }
         return h
@@ -124,7 +186,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     fun playbackHeaders(): Map<String, String> =
         headers().filterKeys { it != "Content-Type" }
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
+    // â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     var lastLoginError: String? = null
         private set
@@ -133,107 +195,107 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         val user = username ?: getUsername() ?: return false
         val pass = password ?: getPassword() ?: return false
         lastLoginError = null
-        return try {
-            // Save credentials early so getDeviceId() can generate correct UUID
-            saveCredentials(user, pass)
+        saveCredentials(user, pass)
+        for (profile in loginProfiles()) {
+            if (loginWithProfile(user, pass, profile)) {
+                saveDeviceProfile(profile)
+                return true
+            }
+            val fatal = lastLoginError?.contains("limiti", ignoreCase = true) == true ||
+                lastLoginError?.contains("sayda", ignoreCase = true) == true ||
+                lastLoginError?.contains("sÃ‰â„¢hvdir", ignoreCase = true) == true
+            if (fatal) return false
+        }
+        return false
+    }
 
+    private suspend fun loginWithProfile(user: String, pass: String, profile: DeviceProfile): Boolean {
+        return try {
             val currentDeviceId = getDeviceId()
-            // Try to logout old device session first (frees up device slot)
             logoutDevice(currentDeviceId)
+            saveDeviceProfile(profile)
 
             val body = mapper.writeValueAsString(
                 LoginRequest(
                     username = user,
                     password = pass,
                     device = currentDeviceId,
-                    // Sending a static deviceClass/Type/Os to ensure consistency
-                    deviceClass = "MOBILE",
-                    deviceType = "ANDROID",
-                    deviceOs = "ANDROID"
+                    deviceClass = profile.deviceClass,
+                    deviceType = profile.deviceType,
+                    deviceOs = profile.deviceOs
                 )
             )
-            android.util.Log.d("CityNetTV", "Login request to: $API_BASE/v2/global/login")
-            android.util.Log.d("CityNetTV", "Login body: $body")
             val res = app.post(
                 "$API_BASE/v2/global/login",
                 headers = headers(withAuth = false, withAccessKey = false),
                 requestBody = body.toOkHttpBody()
             )
-            android.util.Log.d("CityNetTV", "Login response code: ${res.code}")
-            android.util.Log.d("CityNetTV", "Login response body: ${res.text}")
+            android.util.Log.d("CityNetTV", "Login ${profile.key}: ${res.code}")
             if (res.isSuccessful) {
                 val lr = mapper.readValue(res.text, LoginResponse::class.java)
                 val token = lr.resolveAccessToken()
                 if (!token.isNullOrEmpty()) {
                     saveTokens(token, lr.resolveRefreshToken())
-                    val u = lr.resolveUser()
-                    var resolvedUid = u?.uid ?: u?.id
-                    var resolvedPid = u?.profiles?.firstOrNull()?.id ?: u?.profileId
-
-                    // Decode JWT token to extract missing user info if needed
-                    if (resolvedUid == null || resolvedPid == null) {
-                        try {
-                            val parts = token.split(".")
-                            if (parts.size >= 2) {
-                                val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE))
-                                val jwtNode = mapper.readTree(payload)
-                                if (resolvedUid == null) {
-                                    resolvedUid = jwtNode.get("uid")?.asText() ?: jwtNode.get("sub")?.asText() ?: jwtNode.get("user_id")?.asText() ?: jwtNode.get("id")?.asText()
-                                }
-                                if (resolvedPid == null) {
-                                    resolvedPid = jwtNode.get("profile_id")?.asText() ?: jwtNode.get("pid")?.asText()
-                                }
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.e("CityNetTV", "JWT Decode error: ${e.message}")
-                        }
-                    }
-
-                    saveUserInfo(resolvedUid, resolvedPid)
+                    saveResolvedUserInfo(token, lr.resolveUser())
                     lastLoginError = null
                     return true
                 }
-                lastLoginError = lr.error ?: "Token alınmadı: Məlumatlar səhvdir."
+                lastLoginError = lr.error ?: "Token alÃ„Â±nmadÃ„Â±: MÃ‰â„¢lumatlar sÃ‰â„¢hvdir."
             } else {
-                // Parse error response
-                try {
-                    val errBody = res.text
-                    val errNode = mapper.readTree(errBody)
-                    val errCode = errNode?.get("error_code")?.asInt() ?: errNode?.get("code")?.asInt()
-
-                    // The error message can sometimes be nested inside "data" -> "message"
-                    val dataNode = errNode?.get("data")
-                    val errMsg = dataNode?.get("message")?.asText()
-                        ?: errNode?.get("message")?.asText()
-                        ?: errNode?.get("error")?.asText()
-                        ?: errNode?.get("error_message")?.asText()
-
-                    if (errCode == 1067) {
-                        lastLoginError = "Cihaz limiti aşılıb. Rəsmi CityNet TV proqramından köhnə cihazları silin və ya Ayarlardan Cihazı Sıfırlayın."
-                        android.util.Log.w("CityNetTV", "Device limit aşılıb")
-                        return false
-                    }
-                    if (errCode == 4290) {
-                        lastLoginError = "Çox sayda cəhd etdiniz! Bir neçə dəqiqə gözləyin və yenidən yoxlayın."
-                        return false
-                    }
-                    if (errCode == 3010) {
-                        lastLoginError = "İstifadəçi adı və ya şifrə səhvdir."
-                        return false
-                    }
-
-                    lastLoginError = errMsg ?: "Server xətası: ${res.code}"
-                    android.util.Log.e("CityNetTV", "Login error $errCode: $lastLoginError")
-                } catch (pe: Exception) {
-                    lastLoginError = "Server xətası: ${res.code}"
-                    android.util.Log.e("CityNetTV", "Login failed: ${res.code} - ${res.text}")
-                }
+                parseLoginError(res.code, res.text)
             }
             false
         } catch (e: Exception) {
-            lastLoginError = "Şəbəkə xətası: ${e.message}"
+            lastLoginError = "Ã…ÂÃ‰â„¢bÃ‰â„¢kÃ‰â„¢ xÃ‰â„¢tasÃ„Â± (${profile.key}): ${e.message}"
             e.printStackTrace()
             false
+        }
+    }
+
+    private fun saveResolvedUserInfo(token: String, user: UserInfo?) {
+        var resolvedUid = user?.uid ?: user?.id
+        var resolvedPid = user?.profiles?.firstOrNull()?.id ?: user?.profileId
+        if (resolvedUid == null || resolvedPid == null) {
+            try {
+                val parts = token.split(".")
+                if (parts.size >= 2) {
+                    val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE))
+                    val jwtNode = mapper.readTree(payload)
+                    if (resolvedUid == null) {
+                        resolvedUid = jwtNode.get("uid")?.asText()
+                            ?: jwtNode.get("sub")?.asText()
+                            ?: jwtNode.get("user_id")?.asText()
+                            ?: jwtNode.get("id")?.asText()
+                    }
+                    if (resolvedPid == null) {
+                        resolvedPid = jwtNode.get("profile_id")?.asText() ?: jwtNode.get("pid")?.asText()
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CityNetTV", "JWT Decode error: ${e.message}")
+            }
+        }
+        saveUserInfo(resolvedUid, resolvedPid)
+    }
+
+    private fun parseLoginError(code: Int, text: String) {
+        try {
+            val errNode = mapper.readTree(text)
+            val errCode = errNode?.get("error_code")?.asInt() ?: errNode?.get("code")?.asInt()
+            val dataNode = errNode?.get("data")
+            val errMsg = dataNode?.get("message")?.asText()
+                ?: errNode?.get("message")?.asText()
+                ?: errNode?.get("error")?.asText()
+                ?: errNode?.get("error_message")?.asText()
+
+            lastLoginError = when (errCode) {
+                1067 -> "Cihaz limiti aÃ…Å¸Ã„Â±lÃ„Â±b. RÃ‰â„¢smi CityNet TV proqramÃ„Â±ndan kÃƒÂ¶hnÃ‰â„¢ cihazlarÃ„Â± silin vÃ‰â„¢ ya Ayarlardan CihazÃ„Â± SÃ„Â±fÃ„Â±rlayÃ„Â±n."
+                4290 -> "Ãƒâ€¡ox sayda cÃ‰â„¢hd etdiniz! Bir neÃƒÂ§Ã‰â„¢ dÃ‰â„¢qiqÃ‰â„¢ gÃƒÂ¶zlÃ‰â„¢yin vÃ‰â„¢ yenidÃ‰â„¢n yoxlayÃ„Â±n."
+                3010 -> "Ã„Â°stifadÃ‰â„¢ÃƒÂ§i adÃ„Â± vÃ‰â„¢ ya Ã…Å¸ifrÃ‰â„¢ sÃ‰â„¢hvdir."
+                else -> errMsg ?: "Server xÃ‰â„¢tasÃ„Â±: $code"
+            }
+        } catch (_: Exception) {
+            lastLoginError = "Server xÃ‰â„¢tasÃ„Â±: $code"
         }
     }
 
@@ -280,7 +342,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         return res
     }
 
-    // ── Channels ──────────────────────────────────────────────────────────────
+    // â”€â”€ Channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     var lastChannelsError: String? = null
         private set
@@ -289,7 +351,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         lastChannelsError = null
         if (!isLoggedIn()) {
             if (!login()) {
-                lastChannelsError = "Login failed: ${lastLoginError ?: "Bilinməyən xəta"}"
+                lastChannelsError = "Login failed: ${lastLoginError ?: "BilinmÉ™yÉ™n xÉ™ta"}"
                 return emptyList()
             }
         }
@@ -366,12 +428,12 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 }
 
                 if (anyV1AttemptFailed) {
-                    lastChannelsError = "v1 API uğursuz oldu: $lastChannelsError"
+                    lastChannelsError = "v1 API uÄŸursuz oldu: $lastChannelsError"
                 } else {
-                    lastChannelsError = "v1 API boş siyahı qaytardı."
+                    lastChannelsError = "v1 API boÅŸ siyahÄ± qaytardÄ±."
                 }
             } else {
-                lastChannelsError = "UID ($uid) tapılmadı."
+                lastChannelsError = "UID ($uid) tapÄ±lmadÄ±."
                 android.util.Log.w("CityNetTV", "uid is null, falling back to public list")
             }
 
@@ -389,25 +451,28 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     if (!list.isNullOrEmpty()) return list
                 } else {
                     val variant = fallback.split("/").takeLast(2).joinToString("/")
-                    lastChannelsError = (lastChannelsError ?: "") + " | fallback [$variant xətası: ${r2.code}]"
+                    lastChannelsError = (lastChannelsError ?: "") + " | fallback [$variant xÉ™tasÄ±: ${r2.code}]"
                 }
             }
 
             return emptyList()
         } catch (e: Exception) {
-            lastChannelsError = "Şəbəkə xətası: ${e.message}"
+            lastChannelsError = "ÅÉ™bÉ™kÉ™ xÉ™tasÄ±: ${e.message}"
             e.printStackTrace()
             emptyList()
         }
     }
 
-    // ── Stream ────────────────────────────────────────────────────────────────
+    // â”€â”€ Stream â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     var lastStreamError: String? = null
+        private set
+    var lastStreamDiagnostics: List<StreamDiagnostic> = emptyList()
         private set
 
     suspend fun getStreamData(slug: String, id: String? = null, channelUid: String? = null, preferredShowId: String? = null): StreamData? {
         lastStreamError = null
+        lastStreamDiagnostics = emptyList()
         if (!isLoggedIn()) { if (!login()) return null }
         val uid = getUserUid() ?: return null
         return try {
@@ -417,7 +482,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
             val possibleEndpoints = mutableListOf<String>()
             val channelKeys = listOfNotNull(channelUid, slug, id).filter { it.isNotBlank() }.distinct()
             if (channelKeys.isEmpty()) {
-                lastStreamError = "Kanal slug/id boÅŸdur"
+                lastStreamError = "Kanal slug/id boÃ…Å¸dur"
                 return null
             }
 
@@ -486,6 +551,10 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 }
             }
 
+            possibleEndpoints.addAll(
+                possibleEndpoints.toList().map { it.withDashWidevineFormat() }
+            )
+
             val playbackBodies = listOf(
                 mapOf(
                     "device" to getDeviceId(),
@@ -509,16 +578,21 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 )
             ).map { mapper.writeValueAsString(it) }
             val attempts = mutableListOf<String>()
+            val diagnostics = mutableListOf<StreamDiagnostic>()
             var drmDashFallback: StreamData? = null
+            var sawCencHls = false
 
             for (url in possibleEndpoints.distinct()) {
                 val getRes = authGet(url)
-                val getData = parseStreamResponse("GET", url, getRes, attempts)
+                val getData = inspectCencHlsIfNeeded(parseStreamResponse("GET", url, getRes, attempts), diagnostics, attempts)
+                diagnostics.add(getRes.toDiagnostic("GET", url, getData))
                 if (getData?.resolveStreamUrl().isNullOrEmpty().not()) {
                     if (getData.isUnsupportedCencHls()) {
-                        attempts.add("GET ${url.removePrefix(API_BASE)}: CENC-HLS atlandÄ±")
+                        sawCencHls = true
+                        attempts.add("GET ${url.removePrefix(API_BASE)}: CENC-HLS unsupported, DASH fallback not found")
                     } else if (getData.needsDrmFallback()) {
                         drmDashFallback = drmDashFallback ?: getData
+                        if (sawCencHls) return getData
                     } else {
                         return getData
                     }
@@ -527,12 +601,15 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 if ((getRes.isSuccessful && (getData == null || getData.needsDrmFallback())) || getRes.code in setOf(400, 403, 405, 422)) {
                     for (playbackBody in playbackBodies) {
                         val postRes = authPost(url, playbackBody)
-                        val postData = parseStreamResponse("POST", url, postRes, attempts)
+                        val postData = inspectCencHlsIfNeeded(parseStreamResponse("POST", url, postRes, attempts), diagnostics, attempts)
+                        diagnostics.add(postRes.toDiagnostic("POST", url, postData))
                         if (postData?.resolveStreamUrl().isNullOrEmpty().not()) {
                             if (postData.isUnsupportedCencHls()) {
-                                attempts.add("POST ${url.removePrefix(API_BASE)}: CENC-HLS atlandÄ±")
+                                sawCencHls = true
+                                attempts.add("POST ${url.removePrefix(API_BASE)}: CENC-HLS unsupported, DASH fallback not found")
                             } else if (postData.needsDrmFallback()) {
                                 drmDashFallback = drmDashFallback ?: postData
+                                if (sawCencHls) return postData
                             } else {
                                 return postData
                             }
@@ -542,7 +619,12 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                 }
             }
 
-            lastStreamError = attempts.takeLast(8).joinToString(" | ").ifBlank { "Stream endpoint tapÄ±lmadÄ±" }
+            lastStreamError = if (sawCencHls && drmDashFallback == null) {
+                "CENC-HLS unsupported, DASH fallback not found | ${attempts.takeLast(8).joinToString(" | ")}"
+            } else {
+                attempts.takeLast(8).joinToString(" | ").ifBlank { "Stream endpoint tapÃ„Â±lmadÃ„Â±" }
+            }
+            lastStreamDiagnostics = diagnostics.takeLast(16)
             if (drmDashFallback != null) return drmDashFallback
 
             android.util.Log.e("CityNetTV", "All stream endpoints failed: $lastStreamError")
@@ -560,7 +642,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         return if (res.isSuccessful) {
             val streamData = parseStreamData(res.text)
             if (streamData?.resolveStreamUrl().isNullOrEmpty()) {
-                attempts.add("$method $endpoint: boÅŸ")
+                attempts.add("$method $endpoint: boÃ…Å¸")
                 null
             } else {
                 streamData
@@ -598,9 +680,12 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
                     !key.contains("image", ignoreCase = true)
             }
             val typedUrl = typed.resolveStreamUrl()
+            val responseHasCencMarkers = text.hasCencHlsMarkers()
+            val hlsUrlIsCenc = hlsUrl.isCencHlsStream() || (hlsUrl?.looksLikeHlsStream() == true && responseHasCencMarkers)
+            val typedUrlIsCenc = typedUrl.isCencHlsStream() || (typedUrl?.looksLikeHlsStream() == true && responseHasCencMarkers)
             val streamUrl = when {
-                hlsUrl.isCencHlsStream() && !dashUrl.isNullOrEmpty() -> dashUrl
-                typedUrl.isCencHlsStream() && !dashUrl.isNullOrEmpty() -> dashUrl
+                hlsUrlIsCenc && !dashUrl.isNullOrEmpty() -> dashUrl
+                typedUrlIsCenc && !dashUrl.isNullOrEmpty() -> dashUrl
                 else -> hlsUrl ?: typedUrl ?: findTextValue(
                     root,
                     setOf("stream_url", "manifest_url", "manifest", "hls_url", "hls", "dash_url", "dash", "mpd", "m3u8", "file", "src", "uri")
@@ -630,15 +715,46 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
 
             typed.copy(
                 url = streamUrl,
+                streamUrl = streamUrl,
                 lat = typed.lat ?: lat,
                 jwt = typed.jwt ?: jwt,
                 server = typed.server ?: server,
-                drm = drm
+                drm = drm,
+                cencHls = (streamUrl == hlsUrl && hlsUrlIsCenc) || (streamUrl == typedUrl && typedUrlIsCenc)
             )
         } catch (e: Exception) {
             android.util.Log.w("CityNetTV", "Stream parse failed: ${e.message}")
             null
         }
+    }
+
+    private fun com.lagradost.nicehttp.NiceResponse.toDiagnostic(
+        method: String,
+        url: String,
+        streamData: StreamData?
+    ): StreamDiagnostic {
+        val streamUrl = streamData?.resolveStreamUrl()
+        val streamType = when {
+            streamUrl == null -> null
+            streamData?.cencHls == true -> "HLS-CENC"
+            streamUrl.looksLikeDashStream() -> "DASH"
+            streamUrl.looksLikeHlsStream() -> "HLS"
+            else -> "VIDEO"
+        }
+        val server = streamData?.server ?: streamUrl?.resolveCitynetApiServer()?.toString()
+        return StreamDiagnostic(
+            method = method,
+            endpoint = url.removePrefix(API_BASE),
+            code = code,
+            profile = getDeviceProfileKey(),
+            streamType = streamType,
+            server = server,
+            note = when {
+                streamData?.cencHls == true -> "CENC-HLS unsupported, DASH fallback not found"
+                streamData?.needsDrmFallback() == true -> "DRM/DASH candidate"
+                else -> null
+            }
+        )
     }
 
     private fun findTextValue(
@@ -695,7 +811,7 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     }
 
     private fun StreamData.isUnsupportedCencHls(): Boolean {
-        return resolveStreamUrl().isCencHlsStream()
+        return cencHls || resolveStreamUrl().isCencHlsStream()
     }
 
     private fun String.looksLikeHlsStream(): Boolean {
@@ -710,10 +826,82 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
     }
 
     private fun String?.isCencHlsStream(): Boolean {
-        return this?.looksLikeHlsStream() == true && contains("MPEG-CENC", ignoreCase = true)
+        return this?.looksLikeHlsStream() == true && hasCencHlsMarkers()
     }
 
-    // ── EPG ───────────────────────────────────────────────────────────────────
+    private fun String.hasCencHlsMarkers(): Boolean {
+        return contains("MPEG-CENC", ignoreCase = true) ||
+            contains("#EXT-X-KEY", ignoreCase = true) ||
+            contains("METHOD=SAMPLE-AES", ignoreCase = true) ||
+            contains("KEYFORMAT=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"", ignoreCase = true) ||
+            Regex("""METHOD\s*=\s*SAMPLE-AES""", RegexOption.IGNORE_CASE).containsMatchIn(this) ||
+            Regex("""KEYFORMAT\s*=\s*"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"""", RegexOption.IGNORE_CASE).containsMatchIn(this)
+    }
+
+    private suspend fun inspectCencHlsIfNeeded(
+        streamData: StreamData?,
+        diagnostics: MutableList<StreamDiagnostic>,
+        attempts: MutableList<String>
+    ): StreamData? {
+        val streamUrl = streamData?.resolveStreamUrl() ?: return streamData
+        if (streamData.cencHls || streamUrl.isCencHlsStream() || !streamUrl.looksLikeHlsStream()) return streamData
+
+        return try {
+            val res = app.get(streamUrl, headers = playbackHeaders())
+            val isCenc = res.isSuccessful && res.text.hasCencHlsMarkers()
+            diagnostics.add(
+                StreamDiagnostic(
+                    method = "GET",
+                    endpoint = streamUrl,
+                    code = res.code,
+                    profile = getDeviceProfileKey(),
+                    streamType = if (isCenc) "HLS-CENC" else "HLS",
+                    server = streamData.server ?: streamUrl.resolveCitynetApiServer()?.toString(),
+                    note = if (isCenc) "manifest CENC marker" else "manifest sniff"
+                )
+            )
+            if (isCenc) {
+                attempts.add("GET manifest: CENC-HLS unsupported, DASH fallback not found")
+                streamData.copy(cencHls = true)
+            } else {
+                streamData
+            }
+        } catch (e: Exception) {
+            diagnostics.add(
+                StreamDiagnostic(
+                    method = "GET",
+                    endpoint = streamUrl,
+                    code = 0,
+                    profile = getDeviceProfileKey(),
+                    streamType = "HLS",
+                    server = streamData.server ?: streamUrl.resolveCitynetApiServer()?.toString(),
+                    note = "manifest sniff failed: ${e.message}"
+                )
+            )
+            streamData
+        }
+    }
+
+    private fun String.withDashWidevineFormat(): String {
+        val fragmentIndex = indexOf('#')
+        val withoutFragment = if (fragmentIndex >= 0) substring(0, fragmentIndex) else this
+        val fragment = if (fragmentIndex >= 0) substring(fragmentIndex) else ""
+        val queryIndex = withoutFragment.indexOf('?')
+        val base = if (queryIndex >= 0) withoutFragment.substring(0, queryIndex) else withoutFragment
+        val query = if (queryIndex >= 0) withoutFragment.substring(queryIndex + 1) else ""
+        val params = query.split("&")
+            .filter { it.isNotBlank() }
+            .filterNot {
+                val key = it.substringBefore("=").lowercase()
+                key == "format" || key == "drm"
+            }
+            .toMutableList()
+        params.add("format=dash")
+        params.add("drm=widevine")
+        return "$base?${params.joinToString("&")}$fragment"
+    }
+
+    // â”€â”€ EPG â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     suspend fun getCurrentShowId(slug: String): String? {
         return try {
@@ -746,7 +934,17 @@ class CityNetTVApi(private val prefs: SharedPreferences?) {
         } catch (e: Exception) { emptyList() }
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
+    // â”€â”€ Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    private fun String.resolveCitynetApiServer(): Int? {
+        return runCatching {
+            Regex("""api(\d+)\.citynettv\.az""")
+                .find(URI(this).host.orEmpty())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toIntOrNull()
+        }.getOrNull()
+    }
 
     /** Converts a String to a NiceHttp-compatible RequestBody */
     private fun String.toOkHttpBody() =

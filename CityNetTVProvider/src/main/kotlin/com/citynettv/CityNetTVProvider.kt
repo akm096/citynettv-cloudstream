@@ -132,7 +132,10 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
             }
         }
 
-        val streamError = if (stream == null) "\nStream xÉ™tasÄ±: ${api.lastStreamError ?: "link tapÄ±lmadÄ±"}\n" else ""
+        val streamError = if (stream == null) {
+            val diagnostics = api.lastStreamDiagnostics.takeLast(6).joinToString("\n") { it.toString() }
+            "\nStream xÉ™tasÄ±: ${api.lastStreamError ?: "link tapilmadi"}\n$diagnostics\n"
+        } else ""
         val dataJson = mapper.writeValueAsString(
             ld.copy(
                 showId = current?.showId ?: current?.id,
@@ -169,7 +172,7 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
         val isM3u8 = streamUrl.contains(".m3u8", ignoreCase = true) ||
             streamUrl.contains("/hls", ignoreCase = true) ||
             streamUrl.contains("playlist", ignoreCase = true)
-        val isCencHls = isM3u8 && streamUrl.contains("MPEG-CENC", ignoreCase = true)
+        val isCencHls = isM3u8 && streamUrl.hasCencHlsMarkers()
         if (isCencHls) return false
         val isDash = streamUrl.contains(".mpd", ignoreCase = true) ||
             streamUrl.contains("/dash", ignoreCase = true) ||
@@ -248,5 +251,14 @@ class CityNetTVProvider(val context: Context? = null) : MainAPI() {
                 ?.getOrNull(1)
                 ?.toIntOrNull()
         }.getOrNull()
+    }
+
+    private fun String.hasCencHlsMarkers(): Boolean {
+        return contains("MPEG-CENC", ignoreCase = true) ||
+            contains("#EXT-X-KEY", ignoreCase = true) ||
+            contains("METHOD=SAMPLE-AES", ignoreCase = true) ||
+            contains("KEYFORMAT=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"", ignoreCase = true) ||
+            Regex("""METHOD\s*=\s*SAMPLE-AES""", RegexOption.IGNORE_CASE).containsMatchIn(this) ||
+            Regex("""KEYFORMAT\s*=\s*"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"""", RegexOption.IGNORE_CASE).containsMatchIn(this)
     }
 }

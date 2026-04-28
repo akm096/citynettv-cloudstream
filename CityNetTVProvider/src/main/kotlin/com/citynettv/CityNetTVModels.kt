@@ -2,6 +2,7 @@ package com.citynettv
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.databind.JsonNode
 
 // ============== AUTH MODELS ==============
@@ -470,7 +471,8 @@ data class StreamData(
     @JsonProperty("jwt") val jwt: String? = null,
     @JsonProperty("drm") val drm: DrmInfo? = null,
     @JsonProperty("show_id") val showId: String? = null,
-    @JsonProperty("server") val server: String? = null
+    @JsonProperty("server") val server: String? = null,
+    @get:JsonIgnore val cencHls: Boolean = false
 ) {
     fun resolveStreamUrl(): String? =
         streamUrl ?: manifestUrl ?: manifest ?: hlsUrl ?: hls ?: dashUrl ?: dash ?: mpd ?: m3u8 ?: uri ?: file ?: src ?: url
