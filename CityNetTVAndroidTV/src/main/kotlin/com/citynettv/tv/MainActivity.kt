@@ -393,7 +393,7 @@ class MainActivity : Activity() {
     private fun editText(hintText: String): EditText = EditText(this).apply {
         hint = hintText
         textSize = 20f
-        singleLine = true
+        setSingleLine(true)
         setTextColor(Color.WHITE)
         setHintTextColor(TEXT_DIM)
         setPadding(dp(18), 0, dp(18), 0)

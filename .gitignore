@@ -9,4 +9,6 @@
 .cxx
 local.properties
 /CityNetTVProvider/build
+/CityNetTVAndroidTV/build
+/.codex-tools
 *.cs3
